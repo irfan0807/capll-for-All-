@@ -30,6 +30,74 @@
 > fault bit was set correctly but the DTC was not logged — the ECU transition to
 > session-less state was clearing the DTC automatically before it could be read.
 
+**CAPL Script used in the Action:**
+
+```capl
+/*
+ * ACC STAR-1: Radar timeout + DTC persistence check
+ * Sends radar frames for 5s, then stops.
+ * Monitors: ACC fault flag (0x502) AND reads DTC via UDS after timeout.
+ */
+variables {
+  message 0x300 msg_Radar;
+  message 0x7E0 udsReq;          // DTC read request (raw UDS)
+  msTimer tRadarCycle;
+  msTimer tStopRadar;
+  msTimer tReadDTC;
+  int     radarActive = 1;
+  dword   tFaultSet   = 0;       // timestamp when fault flag seen
+}
+
+on start {
+  msg_Radar.dlc = 8;
+  msg_Radar.byte(0) = 0x0F; msg_Radar.byte(1) = 0xA0;  // 40m target
+  msg_Radar.byte(2) = 0x00; msg_Radar.byte(3) = 0x00;  // RelSpeed = 0
+  setTimer(tRadarCycle, 20);
+  setTimer(tStopRadar,  5000);   // kill radar at 5 s
+  write("[ACC-STAR1] Phase 1: Normal radar @ 20ms cycle");
+}
+
+on timer tRadarCycle {
+  if (radarActive) output(msg_Radar);
+  setTimer(tRadarCycle, 20);
+}
+
+on timer tStopRadar {
+  radarActive = 0;
+  write("[ACC-STAR1] Phase 2: RADAR STOPPED — timeout injected @ t=%d ms", timeNow()/100000);
+  setTimer(tReadDTC, 200);       // read DTC 200ms after timeout
+}
+
+on timer tReadDTC {
+  // UDS: ReadDTCInformation — reportDTCByStatusMask 0x08 (confirmed)
+  udsReq.dlc = 8;
+  udsReq.byte(0) = 0x03;
+  udsReq.byte(1) = 0x19;
+  udsReq.byte(2) = 0x02;
+  udsReq.byte(3) = 0x08;
+  output(udsReq);
+  write("[ACC-STAR1] UDS DTC read sent — checking U0401 persistence...");
+}
+
+on message 0x502 {    // ACC status
+  if ((this.byte(0) & 0x04) && tFaultSet == 0) {
+    tFaultSet = timeNow() / 100000;   // ms
+    write("[ACC-STAR1] ACC fault flag SET at t=%d ms", tFaultSet);
+  }
+}
+
+on message 0x7E8 {    // UDS response
+  if (this.byte(1) == 0x59) {         // positive ReadDTC response
+    int numDTCs = (this.dlc - 4) / 4;
+    if (numDTCs > 0) {
+      write("[ACC-STAR1] PASS: %d DTC(s) found — U0401 persisted ✓", numDTCs);
+    } else {
+      write("[ACC-STAR1] FAIL: 0 DTCs — DTC was cleared before NvM write! (BUG)");
+    }
+  }
+}
+```
+
 **R — Result**
 > I raised a P2 defect in JIRA with full CAN log, CAPL script, and timestamp analysis
 > showing the DTC was being cleared within 80ms of being set. The root cause was a
@@ -65,6 +133,72 @@
 > For each, I captured the exact timestamp of TurnSignal rising edge vs
 > LKA_TorqueRequest falling edge in the CANoe Graphics window and measured the delta.
 > On test case 2, I found a 60ms delay — three control cycles — before torque dropped.
+
+**CAPL Script used in the Action:**
+
+```capl
+/*
+ * LKA STAR-2: Turn signal suppression timing test
+ * Injects lane drift then activates turn signal.
+ * Measures latency between TurnSignal rising edge and LKA_TorqueRequest = 0.
+ * REQ-LKA-007: torque must drop within 20ms (1 control cycle).
+ */
+variables {
+  message 0x320 msg_Lane;
+  message 0x220 msg_TurnSig;
+  msTimer tCycle;
+  msTimer tActivateTurn;
+  dword   tTurnActivated = 0;
+  int     torqueWasActive = 0;
+}
+
+on start {
+  // Simulate active left drift — LKA should be correcting
+  msg_Lane.dlc = 8;
+  msg_Lane.byte(0) = 0xFF; msg_Lane.byte(1) = 0x38;  // offset = -200mm (signed)
+  msg_Lane.byte(2) = 0xFF; msg_Lane.byte(3) = 0x9C;  // angle = -100
+  msg_Lane.byte(4) = 2;                               // LaneQuality = high
+
+  msg_TurnSig.dlc = 8;
+  msg_TurnSig.byte(0) = 0x00;   // no turn signal yet
+
+  setTimer(tCycle, 20);
+  setTimer(tActivateTurn, 3000);   // activate turn signal at 3s
+  write("[LKA-STAR2] Phase 1: Left drift active — monitoring torque...");
+}
+
+on timer tCycle {
+  output(msg_Lane);
+  output(msg_TurnSig);
+  setTimer(tCycle, 20);
+}
+
+on timer tActivateTurn {
+  msg_TurnSig.byte(0) = 0x02;   // RIGHT turn signal (test case 2)
+  tTurnActivated = timeNow() / 100000;   // ms
+  write("[LKA-STAR2] Phase 2: RIGHT turn signal activated @ t=%d ms", tTurnActivated);
+}
+
+on message 0x510 {   // LKA torque output
+  int torque = (this.byte(0) << 8) | this.byte(1);
+
+  if (torque > 0) {
+    torqueWasActive = 1;    // confirm LKA was correcting before test
+  }
+
+  // Check torque drop after turn signal
+  if (torqueWasActive && torque == 0 && tTurnActivated > 0) {
+    dword latency = (timeNow() / 100000) - tTurnActivated;
+    if (latency <= 20) {
+      write("[LKA-STAR2] PASS: Torque = 0 in %d ms (≤ 20ms) ✓", latency);
+    } else {
+      write("[LKA-STAR2] FAIL: Torque = 0 after %d ms — EXCEEDS 20ms! (BUG)", latency);
+    }
+    tTurnActivated = 0;   // reset to avoid repeated logging
+    torqueWasActive = 0;
+  }
+}
+```
 
 **R — Result**
 > Filed a P1 defect (safety-critical regression) with timestamp analysis, CAN trace,
@@ -110,6 +244,66 @@
 > now requires 3 consecutive valid target frames before activating, which eliminated
 > the false positive completely.
 
+**CAPL Script used in the Action:**
+
+```capl
+/*
+ * BSD STAR-3: 200ms message gap injection — false chime reproduction
+ * Sends BSD_Left_Target = 0 (no target) normally, but introduces
+ * a 200ms dropout to simulate high bus load gap.
+ * Expected: BSD_WarnLeft should NOT pulse during the gap (bug = it does).
+ */
+variables {
+  message 0x330 msg_BSD;
+  msTimer tBSDCycle;
+  msTimer tInjectGap;
+  msTimer tResumeAfterGap;
+  int     bsdSending = 1;
+  int     gapInjected = 0;
+}
+
+on start {
+  msg_BSD.dlc = 8;
+  msg_BSD.byte(0) = 0x00;   // BSD_Left_Target = 0 (no target)
+  msg_BSD.byte(1) = 0x00;
+  msg_BSD.byte(2) = 0x00;
+  msg_BSD.byte(3) = 0x00;
+  setTimer(tBSDCycle, 20);
+  setTimer(tInjectGap, 3000);   // inject gap at 3s
+  write("[BSD-STAR3] Phase 1: Normal BSD frames — no target present");
+}
+
+on timer tBSDCycle {
+  if (bsdSending) output(msg_BSD);
+  setTimer(tBSDCycle, 20);
+}
+
+on timer tInjectGap {
+  bsdSending = 0;   // STOP sending — simulates 200ms bus dropout
+  gapInjected = 1;
+  write("[BSD-STAR3] Phase 2: GAP INJECTED — 200ms silence on 0x330");
+  setTimer(tResumeAfterGap, 200);
+}
+
+on timer tResumeAfterGap {
+  bsdSending = 1;
+  write("[BSD-STAR3] Phase 3: 0x330 resumed — monitoring for spurious warning...");
+}
+
+on message 0x520 {   // BSD warning output
+  byte warnLeft = this.byte(0) & 0x01;
+  if (warnLeft && gapInjected) {
+    write("[BSD-STAR3] BUG REPRODUCED: BSD_WarnLeft = 1 during/after gap — no target! (P2 defect)");
+  }
+}
+
+on message 0x521 {   // Chime
+  if (this.byte(0) & 0x01 && gapInjected) {
+    write("[BSD-STAR3] BUG REPRODUCED: FALSE CHIME triggered — no target present! ✓");
+  }
+}
+```
+
 ---
 
 ## 4. DMS — Driver Monitoring System
@@ -146,6 +340,89 @@
 > before vehicle testing. The script was adopted by the team as the standard DMS
 > regression suite.
 
+**CAPL Script used in the Action:**
+
+```capl
+/*
+ * DMS STAR-4: Automated drowsiness regression script
+ * Ramps DMS_EyeClosure from 10% → 95% in 5% steps every 500ms.
+ * Logs the exact closure % at which each warning level triggers.
+ * Run 10× per build for regression — no human subject needed.
+ */
+variables {
+  message 0x340 msg_DMS;
+  msTimer tDMSCycle;
+  msTimer tRamp;
+  int eyeClosure = 10;
+  int lastWarnLevel = 0;
+  int runCount = 0;
+  int warnL1_closure = -1;
+  int warnL2_closure = -1;
+  int warnL3_closure = -1;
+}
+
+void resetTest() {
+  eyeClosure   = 10;
+  lastWarnLevel = 0;
+  warnL1_closure = -1;
+  warnL2_closure = -1;
+  warnL3_closure = -1;
+  runCount++;
+  write("[DMS-STAR4] === Run %d started ===", runCount);
+}
+
+on start {
+  msg_DMS.dlc = 8;
+  msg_DMS.byte(0) = 0x00;   // GazeDirection = forward
+  msg_DMS.byte(1) = 0x00;   // HeadPose_Yaw  = 0
+  msg_DMS.byte(2) = eyeClosure;
+  msg_DMS.byte(3) = 0x01;   // FaceDetected = 1
+  setTimer(tDMSCycle, 20);
+  resetTest();
+  setTimer(tRamp, 500);
+}
+
+on timer tDMSCycle {
+  msg_DMS.byte(2) = eyeClosure;
+  output(msg_DMS);
+  setTimer(tDMSCycle, 20);
+}
+
+on timer tRamp {
+  eyeClosure += 5;
+  if (eyeClosure > 95) eyeClosure = 95;
+  write("[DMS-STAR4] EyeClosure ramp → %d%%", eyeClosure);
+  if (eyeClosure < 95) setTimer(tRamp, 500);
+  else write("[DMS-STAR4] Max closure reached — check warning thresholds above");
+}
+
+on message 0x530 {   // DMS warning level
+  byte warnLevel = this.byte(0);
+  if (warnLevel != lastWarnLevel) {
+    write("[DMS-STAR4] Warning LEVEL CHANGE: %d → %d at EyeClosure = %d%%",
+          lastWarnLevel, warnLevel, eyeClosure);
+
+    if (warnLevel == 1 && warnL1_closure < 0) {
+      warnL1_closure = eyeClosure;
+      // REQ: Level 1 at 40% — check
+      write("[DMS-STAR4] L1 threshold = %d%%  Expected ≈ 40%%  → %s",
+            warnL1_closure, (warnL1_closure <= 45) ? "PASS ✓" : "FAIL — too early/late!");
+    }
+    if (warnLevel == 2 && warnL2_closure < 0) {
+      warnL2_closure = eyeClosure;
+      write("[DMS-STAR4] L2 threshold = %d%%  Expected ≈ 70%%  → %s",
+            warnL2_closure, (warnL2_closure <= 75) ? "PASS ✓" : "FAIL!");
+    }
+    if (warnLevel == 3 && warnL3_closure < 0) {
+      warnL3_closure = eyeClosure;
+      write("[DMS-STAR4] L3 threshold = %d%%  Expected ≈ 90%%  → %s",
+            warnL3_closure, (warnL3_closure <= 95) ? "PASS ✓" : "FAIL!");
+    }
+    lastWarnLevel = warnLevel;
+  }
+}
+```
+
 ---
 
 ## 5. APS — Automatic Parking System
@@ -180,6 +457,72 @@
 > reference in JIRA. SW team patched the timeout tolerance from 1 to 3 frames. Verified
 > with the same script — APS now tolerates the 50ms gap and completes the maneuver
 > successfully. Issue closed as resolved.
+
+**CAPL Script used in the Action:**
+
+```capl
+/*
+ * APS STAR-5: USS_Side_R 50ms gap reproduction script
+ * Simulates normal APS reverse maneuver, then injects a 50ms gap
+ * in USS_Side_R (0x351) at the 8-second mark.
+ * Bug: APS aborts on a single missed USS frame.
+ * Expected after fix: APS continues through 3 missed frames.
+ */
+variables {
+  message 0x351 msg_USS_Side;
+  message 0x350 msg_USS_Front_Rear;
+  msTimer tUSSCycle;
+  msTimer tInjectGap;
+  msTimer tResumeUSS;
+  int     ussSideActive = 1;
+  int     gapStart_ms   = 0;
+}
+
+on start {
+  // USS all clear — parking space confirmed, maneuver ongoing
+  msg_USS_Side.dlc = 8;
+  msg_USS_Side.byte(2) = 0x01; msg_USS_Side.byte(3) = 0x90;  // 400cm clear
+  msg_USS_Side.byte(0) = 0x01; msg_USS_Side.byte(1) = 0x90;
+
+  msg_USS_Front_Rear.dlc = 8;
+  msg_USS_Front_Rear.byte(0) = 0xC8;  // Front-L: 200cm
+  msg_USS_Front_Rear.byte(1) = 0xC8;  // Front-R: 200cm
+  msg_USS_Front_Rear.byte(2) = 0x64;  // Rear-L:  100cm
+  msg_USS_Front_Rear.byte(3) = 0x64;  // Rear-R:  100cm
+
+  setTimer(tUSSCycle,  20);
+  setTimer(tInjectGap, 8000);   // gap at 8s — matches final correction phase
+  write("[APS-STAR5] Phase 1: Normal APS maneuver in progress...");
+}
+
+on timer tUSSCycle {
+  output(msg_USS_Front_Rear);
+  if (ussSideActive) output(msg_USS_Side);
+  setTimer(tUSSCycle, 20);
+}
+
+on timer tInjectGap {
+  ussSideActive = 0;
+  gapStart_ms   = timeNow() / 100000;
+  write("[APS-STAR5] Phase 2: USS_Side_R GAP injected — 50ms silence");
+  setTimer(tResumeUSS, 50);    // 50ms gap = 2.5 missed frames @ 20ms cycle
+}
+
+on timer tResumeUSS {
+  ussSideActive = 1;
+  write("[APS-STAR5] Phase 3: USS_Side_R resumed after %d ms gap",
+        (timeNow() / 100000) - gapStart_ms);
+}
+
+on message 0x541 {   // APS status
+  byte apsStatus = this.byte(0);
+  if (apsStatus == 4) {
+    write("[APS-STAR5] BUG REPRODUCED: APS ABORTED (status=4) after USS gap! (P2 defect)");
+  } else if (apsStatus == 3) {
+    write("[APS-STAR5] PASS: APS COMPLETED successfully despite USS gap ✓");
+  }
+}
+```
 
 ---
 
@@ -220,6 +563,99 @@
 > was also escalated to the HIL team to add bus load as a test parameter in their
 > scenario matrix.
 
+**CAPL Script used in the Action:**
+
+```capl
+/*
+ * PCW STAR-6: AEB-P latency measurement — 10 iterations per speed
+ * Injects pedestrian at 10m, steps to 7.5m (inside 8m threshold).
+ * Measures exact latency: threshold crossing → AEB_P_Active.
+ * REQ: latency < 150ms across all iterations.
+ */
+variables {
+  message 0x360 msg_Ped;
+  message 0x200 msg_Speed;
+  msTimer tCycle;
+  msTimer tStepDistance;   // step from 10m → 7.5m
+  msTimer tNextRun;
+
+  dword tTrigger    = 0;
+  int   iteration   = 0;
+  int   totalRuns   = 10;
+  int   speedKmh    = 60;   // change per setpoint: 20/30/40/50/60
+  int   passCount   = 0;
+  int   failCount   = 0;
+  int   maxLatency  = 0;
+  int   minLatency  = 9999;
+  int   pedInjected = 0;
+}
+
+void startRun() {
+  iteration++;
+  pedInjected = 0;
+  tTrigger    = 0;
+
+  // Speed: speedKmh * 100 (factor 0.01)
+  msg_Speed.dlc = 8;
+  msg_Speed.byte(0) = (speedKmh * 100) >> 8;
+  msg_Speed.byte(1) = (speedKmh * 100) & 0xFF;
+
+  // Pedestrian at 10m, in-path
+  msg_Ped.dlc = 8;
+  msg_Ped.byte(0) = 0x01;           // ClassID = pedestrian
+  msg_Ped.byte(1) = 0x03; msg_Ped.byte(2) = 0xE8;  // 1000cm = 10m
+  msg_Ped.byte(3) = 0x00; msg_Ped.byte(4) = 0x00;  // LateralOffset = 0
+  msg_Ped.byte(5) = ((-speedKmh * 278) >> 8) & 0xFF;   // RelSpeed ≈ -ego speed in cm/s
+  msg_Ped.byte(6) =  (-speedKmh * 278)       & 0xFF;
+
+  setTimer(tStepDistance, 2000);    // step to 7.5m after 2s
+  write("[PCW-STAR6] Run %d/%d @ %d km/h — pedestrian at 10m",
+        iteration, totalRuns, speedKmh);
+}
+
+on start {
+  setTimer(tCycle, 20);
+  startRun();
+}
+
+on timer tCycle {
+  output(msg_Speed);
+  output(msg_Ped);
+  setTimer(tCycle, 20);
+}
+
+on timer tStepDistance {
+  // Step to 7.5m — crosses 8m AEB-P threshold
+  msg_Ped.byte(1) = 0x02; msg_Ped.byte(2) = 0xEE;  // 750cm = 7.5m
+  tTrigger    = timeNow() / 100000;  // ms
+  pedInjected = 1;
+  write("[PCW-STAR6] Run %d: distance stepped to 7.5m @ %d ms", iteration, tTrigger);
+}
+
+on message 0x551 {   // AEB-P active
+  if ((this.byte(0) & 0x01) && pedInjected && tTrigger > 0) {
+    dword latency = (timeNow() / 100000) - tTrigger;
+    if (latency > maxLatency) maxLatency = latency;
+    if (latency < minLatency) minLatency = latency;
+
+    if (latency < 150) {
+      passCount++;
+      write("[PCW-STAR6] Run %d: PASS — latency = %d ms ✓", iteration, latency);
+    } else {
+      failCount++;
+      write("[PCW-STAR6] Run %d: FAIL — latency = %d ms > 150ms! (BUG)", iteration, latency);
+    }
+    pedInjected = 0;
+    tTrigger    = 0;
+    if (iteration < totalRuns) setTimer(tNextRun, 1000);
+    else write("[PCW-STAR6] === SUMMARY: PASS=%d FAIL=%d | Min=%dms Max=%dms ===",
+               passCount, failCount, minLatency, maxLatency);
+  }
+}
+
+on timer tNextRun { startRun(); }
+```
+
 ---
 
 ## 7. General ADAS — Cross-Feature Scenarios
@@ -250,6 +686,74 @@
 > sequence in a .blf file and shared it with the gateway team with timestamps highlighted.
 > I also created a simplified CAPL reproduction script (< 30 lines) so any team member
 > could reproduce it without the full simulation setup.
+
+**CAPL Script used in the Action:**
+
+```capl
+/*
+ * CROSS-FEATURE STAR-7: ACC braking + LKA correction simultaneous injection
+ * Reproduces the CAN message flood / gateway retransmission storm.
+ * Monitors bus message count per 100ms window — spike > 50 msg/100ms = anomaly.
+ */
+variables {
+  message 0x300 msg_Radar;      // ACC: radar target
+  message 0x320 msg_Lane;       // LKA: lane offset
+  message 0x200 msg_Speed;      // ego vehicle speed
+  msTimer tCycle;
+  msTimer tMonitorWindow;
+  int msgCountWindow = 0;       // messages seen in last 100ms
+  int maxMsgCount    = 0;
+}
+
+on start {
+  // Speed: 80 km/h
+  msg_Speed.dlc = 8;
+  msg_Speed.byte(0) = 0x1F; msg_Speed.byte(1) = 0x40;  // 8000 = 80.00 km/h
+
+  // ACC: lead vehicle at 15m — gentle braking zone
+  msg_Radar.dlc = 8;
+  msg_Radar.byte(0) = 0x05; msg_Radar.byte(1) = 0xDC;  // 1500cm = 15m
+  msg_Radar.byte(2) = 0x00; msg_Radar.byte(3) = 0x00;
+
+  // LKA: active left drift -200mm
+  msg_Lane.dlc = 8;
+  msg_Lane.byte(0) = 0xFF; msg_Lane.byte(1) = 0x38;    // -200mm
+  msg_Lane.byte(2) = 0xFF; msg_Lane.byte(3) = 0x9C;
+  msg_Lane.byte(4) = 2;                                 // LaneQuality high
+
+  setTimer(tCycle, 20);
+  setTimer(tMonitorWindow, 100);
+  write("[CROSS-STAR7] ACC + LKA simultaneous injection started");
+}
+
+on timer tCycle {
+  output(msg_Speed);
+  output(msg_Radar);
+  output(msg_Lane);
+  setTimer(tCycle, 20);
+}
+
+// Count ALL CAN messages to detect the gateway retransmission storm
+on message * {
+  msgCountWindow++;
+}
+
+on timer tMonitorWindow {
+  if (msgCountWindow > maxMsgCount) maxMsgCount = msgCountWindow;
+  if (msgCountWindow > 50) {
+    write("[CROSS-STAR7] BUS FLOOD DETECTED: %d messages in 100ms window! (norm ≈ 15)",
+          msgCountWindow);
+  } else {
+    write("[CROSS-STAR7] Bus load normal: %d msg/100ms", msgCountWindow);
+  }
+  msgCountWindow = 0;
+  setTimer(tMonitorWindow, 100);
+}
+
+on stopMeasurement {
+  write("[CROSS-STAR7] Peak bus message count: %d/100ms", maxMsgCount);
+}
+```
 
 **R — Result**
 > Gateway team fixed the routing table conflict within 3 days using the reproduction
@@ -283,6 +787,82 @@
 > - Ran in sequence using CANoe's test module framework (vTESTstudio-compatible)
 >
 > I documented a standard header template so new scripts could be added in under 1 hour.
+
+**CAPL Script used in the Action — Regression Framework Template:**
+
+```capl
+/*
+ * ADAS REGRESSION FRAMEWORK — Standard script header template
+ * Each feature script follows this structure.
+ * Results auto-written to Write window (captured by CANoe logging).
+ *
+ * Usage: Copy this template, fill in the signals and thresholds.
+ *        Add to CANoe test module → run in sequence after each SW build.
+ */
+variables {
+  // ── Configuration (edit per feature) ──────────────────────────
+  char   FEATURE_NAME[32] = "ACC";       // change: LKA / BSD / DMS / APS / PCW
+  char   TC_ID[16]        = "TC-ACC-01";
+  int    PASS_THRESHOLD   = 100;         // e.g. latency ms, torque Nm, etc.
+
+  // ── Runtime tracking ──────────────────────────────────────────
+  int    passCount  = 0;
+  int    failCount  = 0;
+  int    testActive = 0;
+
+  // ── Inject messages (fill in per feature) ─────────────────────
+  message 0x300 msg_Stimulus;   // <- change to relevant message ID
+  msTimer tRunCycle;
+  msTimer tEndTest;
+}
+
+/* ── Test start ─────────────────────────────────────────────── */
+on start {
+  write("=== [%s] %s STARTED ===", FEATURE_NAME, TC_ID);
+
+  // Setup stimulus
+  msg_Stimulus.dlc = 8;
+  msg_Stimulus.byte(0) = 0x0F;   // <- fill in test values
+  msg_Stimulus.byte(1) = 0xA0;
+
+  testActive = 1;
+  setTimer(tRunCycle, 20);
+  setTimer(tEndTest, 10000);     // test duration: 10 seconds
+}
+
+/* ── Stimulus cycle ─────────────────────────────────────────── */
+on timer tRunCycle {
+  if (testActive) output(msg_Stimulus);
+  setTimer(tRunCycle, 20);
+}
+
+/* ── Response evaluation (fill in per feature) ─────────────── */
+on message 0x502 {   // <- change to ECU output message
+  int value = this.byte(0);    // <- change to relevant byte/signal
+
+  if (value <= PASS_THRESHOLD) {
+    passCount++;
+  } else {
+    failCount++;
+    write("[%s] FAIL at t=%d ms — value=%d > threshold=%d",
+          TC_ID, timeNow()/100000, value, PASS_THRESHOLD);
+  }
+}
+
+/* ── Test end ───────────────────────────────────────────────── */
+on timer tEndTest {
+  testActive = 0;
+  write("=== [%s] %s RESULT: PASS=%d FAIL=%d → %s ===",
+        FEATURE_NAME, TC_ID,
+        passCount, failCount,
+        (failCount == 0) ? "OVERALL PASS ✓" : "OVERALL FAIL ✗");
+}
+
+on stopMeasurement {
+  write("[%s] Measurement stopped. Final: PASS=%d FAIL=%d",
+        FEATURE_NAME, passCount, failCount);
+}
+```
 
 **R — Result**
 > Full regression run time reduced from 3 days to 4 hours. Once automated, a junior
