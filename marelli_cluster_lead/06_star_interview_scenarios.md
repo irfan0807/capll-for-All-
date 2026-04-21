@@ -528,4 +528,415 @@ Step into the Cluster Lead role effectively: create a test strategy the team cou
 
 ---
 
+## STAR 13 — Managing a Low-Performing Engineer Without Losing Them
+
+### Situation
+Three weeks into Sprint 04, Priya's execution output had dropped significantly — from 12 TCs per day to 4-5. She was missing standup updates, her defect reports lacked reproduction steps, and two of her test cases had already been rejected. Other engineers were silently picking up her backlog. If this continued, the sprint would miss its target and the team dynamics would deteriorate.
+
+### Task
+Address Priya's performance drop constructively, identify whether it was a skill gap, a motivation issue, or a personal problem — and recover the sprint without damaging the team or losing a trained engineer.
+
+### Action
+1. **Private 1:1 first — not in front of the team:** I reached out same day and booked a private 30-minute slot. Rule: never raise performance issues publicly.
+
+2. **Asked open questions, listened first:**
+   - "I've noticed your output has changed in the last two weeks — how are you finding the current work?"
+   - Priya disclosed she was struggling with the UDS-based tests (which required reading CAPL `diagRequest` — a skill she hadn't fully developed) and felt embarrassed to ask for help after 2 years in the team.
+
+3. **Separated the issue: skill gap, not attitude:**
+   - She had been assigned UDS NVM tests (beyond her current CAPL level) without a ramp-up
+   - I had assigned the task assuming she had the UDS knowledge — that was my planning oversight
+
+4. **Immediate corrective actions:**
+   - Reassigned her to gauge sweep tests (her strength) for remainder of the sprint
+   - Paired her with Suresh for 3 UDS sessions (1 hour each) over 2 weeks — structured upskilling
+   - Set a clear checkpoint: "By Sprint 06, I expect you to run 5 UDS TCs independently"
+
+5. **Addressed the backlog impact transparently:**
+   - Redistribted her blocked TCs to Ravi for that sprint — told the team it was a sprint rebalancing decision, not a performance call (protected her dignity)
+
+### Result
+- Sprint 04 target recovered — Ravi completed the UDS TCs in 8 hours
+- Priya's output returned to 10+ TCs/day in Sprint 05 on gauge tasks
+- By Sprint 06, Priya ran 8 UDS TCs independently — exceeded the checkpoint target
+- She stayed on the project and became the team's Python automation specialist
+- I added a sprint planning rule: always verify engineer's current capability before assigning new skill domain tasks
+
+---
+
+## STAR 14 — Building Team Morale During a High-Pressure Final Phase
+
+### Situation
+We were in the final 3 weeks before OEM gateway delivery. The SW team had released 3 builds in 10 days — each with new fixes that required partial regression. My team of 4 engineers was executing 35+ TCs per day, raising defects, retesting fixes, and writing closure reports simultaneously. Two engineers mentioned they were exhausted and one joked about "wanting to quit." Team morale was visibly low.
+
+### Task
+Sustain team productivity through the high-pressure final phase without burning out the engineers or losing quality in the final deliverable.
+
+### Action
+1. **Acknowledged the pressure openly in standup:**
+   - "I know this phase is intense. The pace is higher than normal. I want you to know I see it and I'm going to make some changes today."
+   - Teams lose morale faster when they feel invisible. Acknowledgement costs nothing and costs everything if skipped.
+
+2. **Reduced unnecessary overhead immediately:**
+   - Cancelled the weekly documentation update task (deferred to post-gateway) — saved 3 hours per engineer
+   - Condensed standups from 30 min to 10 min — only blockers and today's priority
+   - Removed the requirement to write execution notes in Jira for every passed TC during regression (summary note only)
+
+3. **Introduced a "done board" visibility:**
+   - Created a shared Teams message pinned at top: "🟢 Passed today: X TCs | 🔴 Defects raised: Y | 🔑 Retests completed: Z"
+   - Updated every evening. Engineers could see progress — progress is motivating.
+
+4. **Gave ownership of a visible win:**
+   - When CLU-1024 (the long-running P1) was finally verified closed, I called it out in the standup: "Suresh found this, Ravi did the detailed trace, Priya retested — this was a team result. This is the one the OEM is watching."
+
+5. **Protected weekends:**
+   - Despite pressure, I held the line on no weekend work. Sustainable pace is a lead's responsibility.
+   - I worked Saturday myself to prepare the OEM status report so the team didn't have to.
+
+### Result
+- Team completed the final phase with 312/320 TCs executed (97.5%) — above target
+- No engineer left the project or requested transfer
+- Ravi mentioned in the project retrospective: "The final sprint was hard but felt manageable — the daily progress update helped a lot."
+- Gateway passed — OEM gave written commendation on delivery quality
+- I was asked to present "team management during high-pressure delivery" at the LTTS Bangalore engineering town hall
+
+---
+
+## STAR 15 — Handling a Scope Increase from OEM Mid-Project (Change Management)
+
+### Situation
+We were 60% through execution when the OEM sent a change request: they wanted to add 45 new test cases for a new DIS feature (Eco Score display) that had been added to the cluster SW in the latest build. The project was already at full capacity. No additional budget or timeline was offered initially.
+
+### Task
+Assess the impact of the scope increase, negotiate with the OEM on timeline or resources, and either absorb or formally reject the change with a documented position.
+
+### Action
+1. **Impact assessment first — estimated before negotiating:**
+   - 45 new TCs at average 30 minutes each = 22.5 engineer-hours
+   - Plus: DBC signal analysis for Eco Score signal (new signal from VCU, not in current DBC) = 4h
+   - Plus: CAPL script update = 6h
+   - Total: ~33 hours = approximately 1 engineer-week
+   - Current buffer in plan: 8 hours → **shortfall: ~25 hours**
+
+2. **Presented options in writing to the PM, not verbal:**
+   ```
+   OPTION A — Accept full scope, extend timeline by 1 week
+   OPTION B — Accept scope, swap out 30 P3 cosmetic TCs (de-scope, OEM approval needed)
+   OPTION C — Partial accept: execute 20 critical Eco Score TCs now, defer 25 to next sprint
+   OPTION D — Reject change, document OEM's written direction if they insist
+   ```
+
+3. **PM escalated to OEM with the option table.** OEM chose Option C — 20 now, 25 in next sprint.
+
+4. **Integrated into backlog immediately:**
+   - Priya took the Eco Score DBC signal work (her strengths: Python + signal analysis)
+   - 20 TCs written and executed within 5 days
+   - 25 TCs documented in Sprint backlog with SRS reference for next sprint
+
+5. **Updated test strategy document** to formally record the scope change, date, and OEM decision reference — essential for closure sign-off.
+
+### Result
+- 20 Eco Score TCs completed within the sprint with no delay to existing work
+- 2 defects raised (Eco Score display wrong unit — L/100km showed as Wh/km on EV variant)
+- OEM signed off scope change formally — no ambiguity at project closure
+- Remaining 25 TCs planned for Sprint 10 — no surprise at sprint planning
+- PM acknowledged the structured option table approach and reused it for 2 subsequent scope changes on the project
+
+---
+
+## STAR 16 — Knowledge Transfer to a New Team at Project Handover
+
+### Situation
+Our cluster validation project was 14 months long. At completion, LTTS management decided the ongoing maintenance validation (handling future SW builds) would be passed to a junior team in Pune, none of whom had worked on this platform before. I had 3 weeks to transfer full project knowledge: CANoe setup, CAPL scripts, bench configuration, DBC management, defect history, and test process.
+
+### Task
+Deliver a complete, effective knowledge transfer so the Pune team could independently run regression tests on a new build within 6 weeks of handover — with no dependency on me.
+
+### Action
+1. **Created a KT (Knowledge Transfer) Pack — first:**
+   - `0_KT_OVERVIEW.md` — team structure, platform overview, key contacts
+   - `1_BENCH_SETUP.md` — step-by-step bench startup, CANoe config load, trouble common errors
+   - `2_DBC_MANAGEMENT.md` — DBC version process, where files live, how to compare versions
+   - `3_CAPL_SCRIPTS.md` — what each script does, how to modify parameters, known limitations
+   - `4_DEFECT_HISTORY.md` — all closed P1/P2 defects with root causes — "known failure modes gallery"
+   - `5_TEST_EXECUTION_SOP.md` — step-by-step SOP for running a full regression cycle
+
+2. **Three-week structured KT plan:**
+   - Week 1: Watch + document (Pune team watches our engineers run full regression remotely via screen share, then documents gaps)
+   - Week 2: Do + review (Pune team runs regression themselves — we review results together)
+   - Week 3: Independent run (Pune team runs alone — I review output without coaching)
+
+3. **Seeded a known defect into the bench for Week 3:**
+   - Injected a DBC version mismatch (changed one signal factor) without telling the Pune team
+   - They had to find it using the comparison process we taught — they did, in 2 hours
+   - This confirmed they could independently debug, not just follow SOPs
+
+4. **Created a "5 Common Failures on This Platform" one-pager:**
+   - Odometer rollback on fast KL30 cycle (root cause + fix history)
+   - ABS telltale DBC bit position (recurring across builds)
+   - Speed filter returning 3 km/h at 0 (display layer bug)
+   - Eco Score unit mismatch on EV variant
+   - CAN timeout fallback shows wrong default value
+
+### Result
+- Pune team ran their first independent regression (40 TCs) in Week 4 — 1 week ahead of target
+- They found a genuine build-introduced regression (fuel gauge rounding error) — unprompted, using the DBC compare script
+- Zero escalations to me in the 8 weeks following handover
+- KT documentation was reviewed by LTTS delivery head and adopted as the standard cluster project handover template
+- My manager used this KT as proof of lead maturity for my grade promotion case
+
+---
+
+## STAR 17 — Onboarding a Fresher Engineer to Full Productivity in 4 Weeks
+
+### Situation
+Anjali joined the cluster validation team directly from college with zero automotive or CAN domain experience. She had basic Python but no CAPL knowledge, no understanding of CANoe, and had never seen a DBC file. My sprint plan had assumed 30 engineer-hours of output from her in week 3. I had 4 weeks to get her to that level.
+
+### Task
+Design and execute a structured 4-week onboarding plan that brought Anjali to the point of independently executing DIS and gauge test cases, raising defects correctly, and using CANoe trace — without pulling senior engineers off their own work for more than 30 minutes per day.
+
+### Action
+
+**Week 1 — Domain (Mornings: Self-study. Afternoons: Shadow)**
+- Reading: `01_instrument_cluster_fundamentals.md` (provided upfront)
+- Task: Identify 10 CAN messages in a live CANoe trace and note what each signal means
+- Outcome check: Written summary — "What does the cluster need from the CAN bus to display at KL15 ON?"
+
+**Week 2 — CANoe + CAPL Basics**
+- I gave her `test_01_telltale_validation.can` — asked her to read it and explain what it does in her own words
+- Exercise: Modify one parameter in the CAPL script (change a timer value from 1000ms to 500ms), run it, observe the change in trace
+- Exercise: Send a manual CAN message using a Panel slider — observe cluster response on bench
+- Outcome check: She must write one CAPL test stub independently (inject a speed signal, wait 200ms, check signal presence in trace)
+
+**Week 3 — Defect Training**
+- I seeded 3 known defects into the bench:
+  1. ABS telltale not activating (DBC bit mismatch)
+  2. Speed showing 3 km/h at 0 km/h
+  3. Odometer not updating (NVM write blocked)
+- She had to find them, identify root cause hypothesis, and write defect reports using the project template
+- I reviewed each report with written feedback: what was correct, what needed improvement, specific example of the correct phrasing
+
+**Week 4 — Independent Execution**
+- Assigned 15 real TCs from the backlog (DIS: trip meter, odometer, fuel range display)
+- She executed, raised defects, and submitted results — I reviewed output but did not assist unless blocked > 30 minutes
+- Friday: structured feedback session
+
+### Result
+- Week 3: Anjali found all 3 seeded defects and wrote defect reports rated "acceptable quality" by Suresh's peer review
+- Week 4: 13 of 15 TCs executed (2 blocked due to bench availability — documented correctly)
+- Week 4: Raised 2 real defects (CLU-1067 trip meter reset in wrong km, CLU-1068 fuel range jumps on cold start)
+- By Sprint 09, Anjali was producing 10 TCs/day — equivalent to a mid-level engineer
+- She was retained on 2 subsequent cluster projects and is now a junior CAPL developer
+- My 4-week plan was shared across the LTTS Bangalore team as an onboarding template
+
+---
+
+## STAR 18 — Managing a Conflict Between Two Senior Engineers
+
+### Situation
+Ravi and Suresh — both senior engineers on my team — had a visible disagreement during a test case review. Suresh had reviewed Ravi's NVM test cases and written 8 rejection comments, some of which Ravi felt were "nit-picks and personal." Ravi responded in the Jira comment thread in a tone that was unprofessional ("Some people should focus on their own work"). This was in written form, visible to the whole team and had the potential to damage team cohesion at a critical point in the project.
+
+### Task
+De-escalate the conflict immediately, maintain professionalism in written project tools, and resolve the underlying technical disagreement — all without losing either engineer's commitment to the project.
+
+### Action
+1. **Acted same day — did not let it sit:**
+   - Edited the Jira comment (as project admin) and posted: "Inline technical discussion continues offline. This thread is now for technical resolution only."
+   - Sent individual messages to both: "Can we three meet for 20 minutes today?"
+
+2. **In the meeting — structure mattered:**
+   - First 5 minutes: Stated the meeting purpose: "We need to resolve this review technically and keep the Jira record professional. I'm not here to judge who was right — I'm here to get the TCs unblocked."
+   - Asked Suresh to walk through his 8 rejection comments one by one — technical only, no framing
+   - Asked Ravi to respond to each: "Agree / Disagree / Need to discuss"
+   - Result: 5 comments were valid rejections (Ravi agreed after explanation). 3 were genuine preference, not defects.
+
+3. **Made a decision on the 3 disputed items** rather than letting it remain unresolved — vague decisions cause resentment to linger.
+
+4. **Separately — private conversation with Ravi:**
+   - "The comment in Jira was not the right forum. I know you're under pressure — but I need the written record to stay professional. I trust you to keep it that way going forward."
+   - No formal warning — this was a first incident, private conversation was the proportionate response.
+
+5. **Separately — private word with Suresh:**
+   - "When reviewing senior peers, frame rejections in terms of the SRS or the checklist — 'This doesn't meet SRS_REQ_014' lands better than a list of comments without justification."
+   - Suresh accepted this — he adjusted his review style.
+
+### Result
+- 5 of 8 TCs corrected by Ravi same day — sprint unblocked
+- 3 disputed TCs resolved with documented lead decision in Jira
+- No further incidents between Ravi and Suresh for the remainder of the project
+- Ravi and Suresh collaborated directly on the CAN timeout automation in Sprint 10 — a sign of restored working relationship
+- I updated the team working agreements document with: *"Technical disagreements are resolved offline. Jira is for technical tracking only."*
+
+---
+
+## STAR 19 — Presenting Test Results at an OEM Gateway Review
+
+### Situation
+The IC Cluster Gateway Review with the OEM (Renault team) was a formal milestone. My manager was travelling, so I was asked to present the test results directly to the OEM's validation lead and system architect — approximately 8 people on the call. This was my first solo OEM gateway presentation. The results included 2 open P2 defects that the OEM would scrutinise.
+
+### Task
+Present the test results clearly, handle technical questions from OEM engineers with confidence, and achieve gateway sign-off — with 2 open P2 defects on record.
+
+### Action
+1. **Prepared a structured slide deck (10 slides, no more):**
+   - Slide 1: Scope of validation (what was tested, what was out-of-scope)
+   - Slide 2: Test execution summary (TCs: 320 total, 314 passed, 4 failed, 2 blocked)
+   - Slide 3: Defect summary (open P1: 0. Open P2: 2. Open P3: 8)
+   - Slide 4–5: P2 CLU-1044 (speedometer over-read) — root cause, OEM SRS vs observation, SW fix plan
+   - Slide 6–7: P2 CLU-1051 (CAN timeout fallback wrong value) — root cause, fix plan, ETA
+   - Slide 8: Test coverage heatmap (feature × test type matrix — visual)
+   - Slide 9: Risk table with mitigations
+   - Slide 10: OEM decision request (sign off with 2 P2 open, fix confirmed by Sprint 10)
+
+2. **Prepared answers to likely hard questions:**
+   - "Why is CLU-1044 still open?": SW fix was provided in v1.5.2 but we need one more full regression cycle — ETA 5 days
+   - "Can you guarantee no further P1 defects?": Not guarantee — but coverage is 98.7% of SRS, all ASIL B features verified
+   - "What is the risk of shipping with P2 open?": CLU-1044 is within EU Reg 39 limits — OEM SRS tighter, agreed deferral option if needed
+
+3. **During the call — stayed factual, no defensiveness:**
+   - When OEM architect challenged CLU-1044 severity: "Understood. We have the log data here — let me share screen and walk through the measurement."
+   - Showed the trace live, walked through signal vs display value, quoted Reg 39 and OEM SRS side by side
+   - OEM architect: "OK — that's clear. What's the fix ETA?" → answered precisely: "Build v1.5.2 available Monday, retest complete by Wednesday."
+
+4. **Requested the gateway decision explicitly at the end:**
+   - "Based on the evidence presented, I am requesting gateway sign-off with the 2 P2 defects tracked to Sprint 10 delivery. Are there any objections?"
+
+### Result
+- **Gateway signed off in the same session** — no follow-up meeting required
+- OEM validation lead commented: "Best-prepared gateway pack we have received from LTTS in this programme"
+- CLU-1044 and CLU-1051 both fixed and verified in Sprint 10 as committed
+- My manager promoted me to technical lead grade at end of the year, citing the gateway presentation as evidence of customer-facing readiness
+- I documented the gateway prep process and slide structure as a reusable checklist for future cluster leads
+
+---
+
+## STAR 20 — Recovering from a Test Coverage Gap Found at Gateway
+
+### Situation
+Two days before the OEM gateway review, during my final internal audit of the traceability matrix, I discovered that 12 test cases linked to SRS requirement cluster `IC_SRS_TEL_REQ_020` (telltale dual-fault priority) had never been executed — they were written, but not scheduled due to a sprint planning error. Six of them tested ASIL B telltale priority behaviour (SRS/ABS simultaneous fault — which one takes priority). These were not cosmetic — they were safety-relevant requirements.
+
+### Task
+Assess whether the 12 TCs could be executed in 2 days without disrupting delivery, decide whether to disclose the gap to the OEM, and ensure the coverage gap was formally handled before gateway.
+
+### Action
+1. **Immediate scope assessment:**
+   - 12 TCs: 6 ASIL B priority tests + 6 P3 visual priority tests
+   - Average execution time: 20 minutes per TC = 4 hours total
+   - CAPL script already existed for telltale injection — no new scripting needed
+   - Bench available: yes
+
+2. **Decision: execute all 12 before gateway, do not enter gateway with an untested ASIL B requirement:**
+   - Communicated to team at 4pm: "We have 12 TCs to execute tomorrow. Suresh — you own the ASIL B 6. Ravi — you take the 3 visual. I take the remaining 3."
+   - Bench booked 7am–1pm the next day
+
+3. **Results — executed all 12 TCs by 2pm, one day before gateway:**
+   - 10 passed
+   - 2 failed: CLU-1071 (SRS wins over ABS simultaneously — incorrect) and CLU-1072 (cluster shows both P1 simultaneously — only one should show per ISO 2575 priority rule)
+   - Both raised as P1 immediately
+
+4. **Decision on disclosure — I chose to be transparent with the OEM:**
+   - Told PM same day: "We found a coverage gap — 12 TCs not previously executed. We ran them today. 2 found real P1 defects that would have escaped. I recommend we disclose this at gateway and explain the corrective action."
+   - PM agreed
+
+5. **At gateway — stated it directly:**
+   - "During our internal pre-gateway audit, we identified 12 TCs from requirement IC_SRS_TEL_REQ_020 had not been executed due to a sprint scheduling error. We executed all 12 yesterday. 10 passed. 2 P1 defects were found and are now on the defect register. The corrective process: we have updated the sprint planning checklist to include mandatory traceability matrix review in week 1 and week N-2 of each sprint."
+
+### Result
+- OEM validation lead: "We appreciate the proactive disclosure. Two P1s found before delivery is better than two P1s found in production."
+- Gateway was conditioned — sign-off given pending P1 fix delivery, not cancelled
+- CLU-1071 and CLU-1072 both fixed in IC_SW_v1.5.3 (SW priority logic corrected per ISO 2575)
+- Verified passed — conditional gateway became full gateway 8 days later
+- The traceability matrix review became a formal sprint checklist item across all LTTS IC projects
+- I received internal recognition for transparency — explicitly mentioned in the project retrospective by the PM
+
+---
+
+## STAR 21 — Handling Customer Escalation Directly (Bypassing PM)
+
+### Situation
+The OEM customer lead (Renault validation manager) sent me a direct email at 7pm on a Thursday — bypassing our PM — with a list of 6 questions about a P1 defect (CLU-1024) that had been open for 9 days. The email tone was sharp: *"We are not satisfied with the pace of resolution. Please explain what is being done and when this will be fixed."* My PM was on a flight and unreachable for 6 hours.
+
+### Task
+Respond professionally and factually to the OEM without overstepping my authority, reassure the customer with evidence, and brief my PM as soon as they landed.
+
+### Action
+1. **Read all 6 questions — categorised them:**
+   - Q1–Q3: Status and root cause of CLU-1024 (I know this fully)
+   - Q4: Escalation path within LTTS (requires PM)
+   - Q5: Impact on gateway date (requires PM)
+   - Q6: What process change will prevent recurrence (I can answer partially)
+
+2. **Responded within 90 minutes — factual, measured, no promises outside my authority:**
+
+   *"Thank you for reaching out directly. Here is everything I can share right now:*
+
+   *CLU-1024 Status: Root cause confirmed — ABS ECU DBC v2.2 used in test, cluster SW references v2.3 (bit position delta: Byte 0, Bit 0 → Bit 1). ABS ECU team confirmed fix in build ABS_SW_v3.1.1, ETA delivery to us: Monday 09:00. Our retest plan: Monday afternoon, results by 17:00.*
+
+   *Q4 (escalation path) and Q5 (gateway impact): I am copying [PM name] on this reply — he will respond to those questions by [tomorrow] morning when he lands.*
+
+   *Q6 (process change): I have already introduced a DBC version verification step at every bench session start. I can provide the updated process checklist.*
+
+   *I understand the frustration. A 9-day P1 is not acceptable — this is also unacceptable to our team. I am personally on the retest Monday."*
+
+3. **Immediately drafted a brief for PM:** Sent a 5-bullet WhatsApp summary so PM could read it on landing and respond to Q4 and Q5.
+
+4. **Monday — retested as committed:** CLU-1024 passed on ABS_SW_v3.1.1. Results sent to OEM by 16:30.
+
+### Result
+- OEM responded: *"Thank you for the detailed response and for owning the Monday retest personally. This is the clarity we needed."*
+- PM returned, reviewed my reply — no concern raised. PM told me: *"That's exactly how I would have answered it. Good call not to speculate on Q4/Q5."*
+- CLU-1024 formally closed Tuesday — OEM satisfied with resolution speed once they had visibility
+- No further direct bypassing of PM by OEM — the channel was re-established correctly
+- I was given broader direct OEM communication authority for the rest of the project by PM
+
+---
+
+## STAR 22 — Running Retrospectives to Continuously Improve the Team
+
+### Situation
+After Sprint 06, I noticed the same types of issues repeating across sprints: TCs with vague expected results (fixed in Sprint 03, reappearing in Sprint 06), engineers not updating Jira on completion (raised in Sprint 04, still happening in Sprint 06). The team had no formal retrospective process. Problems were flagged, forgotten, and rediscovered.
+
+### Task
+Introduce a structured retrospective process that would capture lessons, assign owners to improvements, and actually close them — turning retrospectives from a venting exercise into a delivery improvement mechanism.
+
+### Action
+1. **Introduced a 30-minute retrospective at the end of every sprint — not optional:**
+
+   Format (strict):
+   ```
+   10 min — What went well? (each person shares 1 item — not generic, specific)
+   10 min — What didn't go well? (each person shares 1 item)
+   10 min — Action items (max 3 items, each with owner + due date)
+   ```
+
+2. **The 3-action-item rule was important:**
+   - Previous retrospectives had 12 "improvements" — none got closed
+   - 3 items, owned, with a due date → accountability
+   - Items carried to next retro until closed
+
+3. **Sprint 07 retrospectives output (example):**
+   ```
+   ACTION 1: Ravi — Add SRS revision check to TC review checklist (due: Tue Sprint 08 Day 1)
+   ACTION 2: Lead — Publish Jira board link in daily standup message (due: Sprint 08 Day 1)
+   ACTION 3: Priya — Create a common CAPL script parameter CSV template (due: Sprint 08 Day 5)
+   ```
+
+4. **Built a retrospective tracker (1-page Google Sheet):**
+   - Sprint | Action | Owner | Status | Closed date
+   - Reviewed in first 5 minutes of the next sprint's retrospective
+
+5. **Made "what went well" mandatory — not optional:**
+   - Engineers in delivery pressure phases often only focus on problems
+   - Naming what worked reinforced good patterns (e.g., "the daily progress board helped a lot")
+
+### Result
+- Sprint 08 opened with all 3 Sprint 07 actions closed — first time in the project
+- TC rejection rate for vague expected results: 40% (Sprint 03) → 8% (Sprint 09)
+- Jira update compliance: engineer self-reported at end of day → near 100% by Sprint 09
+- The retrospective format was adopted across 3 other LTTS IC project teams
+- My PM included the retrospec tracker as a project management best practice in his year-end report
+- Engineers mentioned in 360 feedback: *"Finally a team that actually learns from each sprint"*
+
+---
+
 *File: 06_star_interview_scenarios.md | marelli_cluster_lead series*
