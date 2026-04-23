@@ -5,6 +5,9 @@ This suite provides:
 - Full **regression** validation
 - **250 total ADAS test cases** with edge/boundary coverage
 
+Detailed integration reference:
+- `REALTIME_INTEGRATION_GUIDE.md` (mock data location, real-time HTTP connection, software options, mapping strategy)
+
 ## Features covered
 - AEB, FCW, ACC, LKA, BSD, TSR, DMS
 
