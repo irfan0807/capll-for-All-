@@ -342,3 +342,128 @@ def build_catalog() -> list[ADASTestCase]:
 CATALOG = build_catalog()
 SMOKE_CASES = [c for c in CATALOG if "smoke" in c.tags]
 REGRESSION_CASES = [c for c in CATALOG if "regression" in c.tags]
+
+
+def generate_mock_scenarios_100() -> list[dict[str, Any]]:
+    """
+    Generate 100 diverse mock ADAS scenarios for rapid prototyping, API stubbing,
+    and exploratory simulation.
+
+    Each scenario contains:
+    - scenario_id: stable ID string
+    - feature: ADAS domain (AEB/FCW/ACC/LKA/BSD/TSR/DMS)
+    - edge_case: boundary/limit condition marker
+    - scenario: normalized input payload
+    """
+    specs: dict[str, dict[str, list[Any]]] = {
+        "AEB": {
+            "ego_speed_mps": [0.0, 5.0, 13.9, 22.2],
+            "target_distance_m": [2.0, 8.0, 20.0, 60.0],
+            "closing_speed_mps": [0.0, 3.0, 8.0],
+            "road_friction": [0.2, 0.4, 0.8],
+            "sensor_ok": [True, False],
+        },
+        "FCW": {
+            "ego_speed_mps": [5.0, 13.9, 25.0],
+            "target_distance_m": [3.0, 12.0, 40.0],
+            "closing_speed_mps": [0.0, 4.0, 10.0],
+            "visibility_m": [20.0, 40.0, 120.0],
+            "sensor_ok": [True, False],
+        },
+        "ACC": {
+            "ego_speed_mps": [8.3, 16.6, 27.7],
+            "set_speed_mps": [10.0, 20.0, 33.3],
+            "lead_gap_m": [8.0, 12.0, 35.0],
+            "speed_limit_kph": [30, 80, 120],
+            "sensor_ok": [True, False],
+        },
+        "LKA": {
+            "ego_speed_mps": [5.0, 15.0, 30.5],
+            "lane_offset_m": [-0.45, -0.25, 0.25, 0.45],
+            "lane_confidence": [0.4, 0.6, 0.9],
+            "turn_indicator_on": [False, True],
+            "sensor_ok": [True, False],
+        },
+        "BSD": {
+            "ego_speed_mps": [8.0, 16.0, 25.0],
+            "blind_spot_obj": [False, True],
+            "relative_obj_speed_mps": [-12.0, -8.0, 0.0, 4.0],
+            "turn_indicator_on": [False, True],
+            "sensor_ok": [True, False],
+        },
+        "TSR": {
+            "ego_speed_mps": [8.3, 13.9, 22.2, 36.1],
+            "speed_limit_kph": [30, 50, 80, 120],
+            "sign_detected": [False, True],
+            "sensor_ok": [True, False],
+        },
+        "DMS": {
+            "ego_speed_mps": [0.0, 8.3, 16.6, 27.7],
+            "eyes_off_road_s": [0.0, 1.9, 2.0, 4.0, 5.0],
+            "yawning": [False, True],
+            "sensor_ok": [True, False],
+        },
+    }
+
+    feature_order = ["AEB", "FCW", "ACC", "LKA", "BSD", "TSR", "DMS"]
+    targets = {
+        "AEB": 15,
+        "FCW": 15,
+        "ACC": 14,
+        "LKA": 14,
+        "BSD": 14,
+        "TSR": 14,
+        "DMS": 14,
+    }
+
+    def is_edge(feature: str, scenario: dict[str, Any]) -> bool:
+        if feature == "AEB":
+            return scenario["target_distance_m"] in (2.0, 60.0) or _edge(
+                float(scenario["road_friction"]), 0.4, 0.01
+            )
+        if feature == "FCW":
+            return scenario["visibility_m"] in (20.0, 40.0)
+        if feature == "ACC":
+            return scenario["lead_gap_m"] in (8.0, 12.0)
+        if feature == "LKA":
+            return _edge(abs(float(scenario["lane_offset_m"])), 0.25, 0.01) or _edge(
+                float(scenario["lane_confidence"]), 0.6, 0.01
+            )
+        if feature == "BSD":
+            return scenario["relative_obj_speed_mps"] in (-8.0, 0.0)
+        if feature == "TSR":
+            ego_kph = round(float(scenario["ego_speed_mps"]) * 3.6)
+            return ego_kph in (30, 50, 80)
+        if feature == "DMS":
+            return float(scenario["eyes_off_road_s"]) in (1.9, 2.0, 4.0)
+        return False
+
+    scenarios: list[dict[str, Any]] = []
+    serial = 1
+
+    for feature in feature_order:
+        keys = list(specs[feature].keys())
+        values = [specs[feature][key] for key in keys]
+        required_count = targets[feature]
+        generated = 0
+
+        for combo in product(*values):
+            if generated >= required_count:
+                break
+
+            scenario = {k: v for k, v in zip(keys, combo)}
+            scenarios.append(
+                {
+                    "scenario_id": f"MOCK-{feature}-{serial:03d}",
+                    "feature": feature,
+                    "edge_case": is_edge(feature, scenario),
+                    "scenario": scenario,
+                }
+            )
+            generated += 1
+            serial += 1
+
+    if len(scenarios) != 100:
+        raise ValueError(f"Expected 100 scenarios, got {len(scenarios)}")
+
+    return scenarios
