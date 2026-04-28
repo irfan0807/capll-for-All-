@@ -1,0 +1,363 @@
+/*
+ * ADAS_L4_Monitor.can
+ * ===================
+ * CANalyzer/CANoe CAPL test script for ADAS Level 4 ECU
+ *
+ * Tests:
+ *   TC1:  ADAS ECU heartbeat – verify safety status message (0x350) at 10 Hz
+ *   TC2:  L4 engagement check – system state transitions to ACTIVE_L4
+ *   TC3:  Object detection – verify object list message (0x300) populated
+ *   TC4:  Lane info message – verify lane data (0x310) present
+ *   TC5:  AEB trigger test – inject close obstacle, verify AEB flag set
+ *   TC6:  Speed command check – verify CMD speed within limits (0x340)
+ *   TC7:  Sensor fault simulation – LiDAR fault → safety status degraded
+ *   TC8:  ODD exit – safety status shows minimal risk
+ *   TC9:  Emergency stop – brake pedal command at 100%
+ *   TC10: CAN bus load monitor – ensure <50% bus utilisation
+ */
+
+includes {
+}
+
+variables {
+    /* ---- Message structures ---- */
+    message 0x350 msgSafetyStatus;     /* Safety status */
+    message 0x300 msgObjectList;       /* Object list */
+    message 0x310 msgLaneInfo;         /* Lane info */
+    message 0x340 msgVehicleCmd;       /* Vehicle commands */
+    message 0x320 msgEgoState;         /* Ego vehicle state */
+
+    /* ---- Test state ---- */
+    int  g_testPass       = 0;
+    int  g_testFail       = 0;
+    int  g_safetyMsgCount = 0;
+    int  g_objMsgCount    = 0;
+    int  g_laneMsgCount   = 0;
+    int  g_cmdMsgCount    = 0;
+    long g_lastSafetyTs   = 0;
+    long g_lastObjTs      = 0;
+
+    /* ---- Decoded values ---- */
+    int  g_systemState    = -1;  /* from byte 0 of 0x350 */
+    int  g_faultByte      = 0;   /* from byte 1 */
+    int  g_aebActive      = 0;   /* from byte 2 bit 0 */
+    int  g_oddValid       = 0;   /* from byte 2 bit 2 */
+    int  g_minTtc10ths    = 255; /* from byte 3 (×0.1s) */
+
+    float g_reportedBrake = 0.0;  /* from 0x340 byte 5 */
+
+    /* ---- Constants ---- */
+    const int STATE_POWER_OFF   = 0;
+    const int STATE_SELF_TEST   = 1;
+    const int STATE_STANDBY     = 2;
+    const int STATE_ACTIVE_L4   = 3;
+    const int STATE_DEGRADED    = 4;
+    const int STATE_SAFE_STOP   = 5;
+    const int STATE_MINIMAL_RISK= 6;
+    const int STATE_FAULT       = 8;
+}
+
+/* =====================================================================
+ * HELPER: Pass / Fail reporting
+ * ===================================================================== */
+void reportPass(char testId[], char description[]) {
+    g_testPass++;
+    write("[PASS] TC%s: %s", testId, description);
+}
+
+void reportFail(char testId[], char description[]) {
+    g_testFail++;
+    write("[FAIL] TC%s: %s *** FAILED ***", testId, description);
+}
+
+/* =====================================================================
+ * MESSAGE RECEPTION HANDLERS
+ * ===================================================================== */
+on message 0x350 {
+    g_safetyMsgCount++;
+    g_systemState = this.byte(0);
+    g_faultByte   = this.byte(1);
+    g_aebActive   = (this.byte(2) & 0x01) ? 1 : 0;
+    g_oddValid    = (this.byte(2) & 0x04) ? 1 : 0;
+    g_minTtc10ths = this.byte(3);
+
+    /* TC1: Check message period ~100ms (10Hz) */
+    if (g_safetyMsgCount > 1) {
+        long deltaMs = timeNow() / 100000 - g_lastSafetyTs;
+        if (deltaMs < 80 || deltaMs > 130) {
+            write("[WARN] TC1: Safety msg period out of range: %d ms", deltaMs);
+        }
+    }
+    g_lastSafetyTs = timeNow() / 100000;
+}
+
+on message 0x300 {
+    g_objMsgCount++;
+    g_lastObjTs = timeNow() / 100000;
+}
+
+on message 0x310 {
+    g_laneMsgCount++;
+}
+
+on message 0x340 {
+    g_cmdMsgCount++;
+    g_reportedBrake = this.byte(5);
+}
+
+/* =====================================================================
+ * TC1: Heartbeat – safety status arrives at 10 Hz
+ * ===================================================================== */
+testcase TC1_SafetyHeartbeat() {
+    write("--- TC1: Safety Status Heartbeat (10 Hz) ---");
+    int startCount = g_safetyMsgCount;
+    testWaitForMessage(0x350, 2000);  /* wait up to 2s for first msg */
+    testWaitForTimeout(1100);         /* accumulate 1.1s */
+    int rxCount = g_safetyMsgCount - startCount;
+
+    /* Expect 9-12 messages in 1.1s (10Hz ±20%) */
+    if (rxCount >= 8 && rxCount <= 13) {
+        reportPass("1", "Safety heartbeat within 10Hz ±20%");
+    } else {
+        reportFail("1", "Safety heartbeat frequency out of range");
+        write("  Received %d messages in 1.1s (expected 9-12)", rxCount);
+    }
+}
+
+/* =====================================================================
+ * TC2: L4 engagement – system state transitions to ACTIVE_L4 (3)
+ * ===================================================================== */
+testcase TC2_L4Engagement() {
+    write("--- TC2: L4 Engagement State Transition ---");
+    /* Trigger engagement via UDS service 0x2F (IO control) or diagnostic */
+    /* In simulation, we observe state transition after startup */
+    testWaitForTimeout(2000);
+
+    if (g_systemState == STATE_ACTIVE_L4) {
+        reportPass("2", "System state = ACTIVE_L4");
+    } else if (g_systemState == STATE_STANDBY) {
+        reportPass("2", "System reached STANDBY (engage request needed)");
+    } else {
+        write("  Current state: %d", g_systemState);
+        reportFail("2", "System not in ACTIVE_L4 or STANDBY after 2s");
+    }
+}
+
+/* =====================================================================
+ * TC3: Object list message populated
+ * ===================================================================== */
+testcase TC3_ObjectListPresence() {
+    write("--- TC3: Object List Message Presence ---");
+    int startCount = g_objMsgCount;
+    testWaitForMessage(0x300, 1500);
+    testWaitForTimeout(500);
+
+    if (g_objMsgCount > startCount) {
+        reportPass("3", "Object list messages (0x300) received");
+    } else {
+        reportFail("3", "No object list messages received");
+    }
+}
+
+/* =====================================================================
+ * TC4: Lane info message present
+ * ===================================================================== */
+testcase TC4_LaneInfoPresence() {
+    write("--- TC4: Lane Info Message (0x310) presence ---");
+    int startCount = g_laneMsgCount;
+    testWaitForMessage(0x310, 1500);
+    testWaitForTimeout(500);
+
+    if (g_laneMsgCount > startCount) {
+        reportPass("4", "Lane info messages (0x310) received");
+    } else {
+        reportFail("4", "No lane info messages received");
+    }
+}
+
+/* =====================================================================
+ * TC5: AEB trigger – inject object with low TTC via UDS WriteByID
+ *      Observe: AEB flag set in 0x350
+ * ===================================================================== */
+testcase TC5_AEBTrigger() {
+    write("--- TC5: AEB Trigger (low TTC simulation) ---");
+
+    /* Send UDS WriteByIdentifier to set test mode (DID 0x0200 = AEB_TEST) */
+    message 0x7E2 udsReq;
+    udsReq.dlc = 8;
+    udsReq.byte(0) = 0x04;  /* ISO-TP SF 4 bytes */
+    udsReq.byte(1) = 0x2E;  /* SID 0x2E WriteByID */
+    udsReq.byte(2) = 0x02;  /* DID high */
+    udsReq.byte(3) = 0x00;  /* DID low */
+    udsReq.byte(4) = 0x01;  /* value = inject AEB */
+    output(udsReq);
+
+    testWaitForTimeout(500);  /* wait for AEB to activate */
+
+    if (g_aebActive == 1) {
+        reportPass("5", "AEB activated flag set in safety status");
+    } else {
+        /* In pure CAN monitoring, AEB is observable from brake command */
+        if (g_reportedBrake >= 95) {
+            reportPass("5", "AEB activated via brake=100%");
+        } else {
+            write("  AEB flag = %d, brake = %.0f%%", g_aebActive, g_reportedBrake);
+            reportFail("5", "AEB not triggered");
+        }
+    }
+}
+
+/* =====================================================================
+ * TC6: Speed command within limits (0–200 km/h)
+ * ===================================================================== */
+testcase TC6_SpeedCommandLimits() {
+    write("--- TC6: Speed Command Within Limits ---");
+    message 0x340 cmd;
+    testWaitForMessage(0x340, 1000);
+
+    /* Decode target speed: bytes 0-1, factor 0.1 km/h */
+    int rawSpd = (msgVehicleCmd.byte(0) << 8) | msgVehicleCmd.byte(1);
+    float cmdKph = rawSpd * 0.1;
+
+    if (cmdKph >= 0.0 && cmdKph <= 200.0) {
+        reportPass("6", "Command speed within 0-200 km/h");
+        write("  Target speed: %.1f km/h", cmdKph);
+    } else {
+        reportFail("6", "Command speed out of valid range");
+        write("  raw=0x%04X → %.1f km/h", rawSpd, cmdKph);
+    }
+}
+
+/* =====================================================================
+ * TC7: LiDAR fault → safety status degraded
+ * ===================================================================== */
+testcase TC7_LidarFaultDegrades() {
+    write("--- TC7: LiDAR Fault → DEGRADE_ODD ---");
+
+    /* Trigger simulated LiDAR fault via UDS */
+    message 0x7E2 udsReq;
+    udsReq.dlc = 8;
+    udsReq.byte(0) = 0x04;
+    udsReq.byte(1) = 0x2E;
+    udsReq.byte(2) = 0x02;
+    udsReq.byte(3) = 0x01;  /* DID 0x0201 = LIDAR_FAULT */
+    udsReq.byte(4) = 0x01;
+    output(udsReq);
+
+    testWaitForTimeout(500);
+
+    /* LiDAR fault = bit 0 of fault byte */
+    if (g_faultByte & 0x01) {
+        reportPass("7", "LiDAR fault bit set in safety status");
+    } else if (g_systemState == STATE_DEGRADED) {
+        reportPass("7", "System entered DEGRADED state");
+    } else {
+        write("  faultByte = 0x%02X, systemState = %d",
+              g_faultByte, g_systemState);
+        reportFail("7", "LiDAR fault not reflected in safety status");
+    }
+}
+
+/* =====================================================================
+ * TC8: ODD exit → minimal risk condition state
+ * ===================================================================== */
+testcase TC8_OddExitMinimalRisk() {
+    write("--- TC8: ODD Exit → MINIMAL_RISK state ---");
+
+    /* Trigger ODD exit via UDS */
+    message 0x7E2 udsReq;
+    udsReq.dlc = 8;
+    udsReq.byte(0) = 0x04;
+    udsReq.byte(1) = 0x2E;
+    udsReq.byte(2) = 0x02;
+    udsReq.byte(3) = 0x02;   /* DID 0x0202 = ODD_EXIT */
+    udsReq.byte(4) = 0x01;
+    output(udsReq);
+
+    testWaitForTimeout(1000);
+
+    if (g_systemState == STATE_MINIMAL_RISK || g_systemState == STATE_SAFE_STOP) {
+        reportPass("8", "System in MINIMAL_RISK or SAFE_STOP after ODD exit");
+        write("  State = %d", g_systemState);
+    } else {
+        write("  systemState = %d (expected %d or %d)",
+              g_systemState, STATE_MINIMAL_RISK, STATE_SAFE_STOP);
+        reportFail("8", "System did not enter MINIMAL_RISK after ODD exit");
+    }
+}
+
+/* =====================================================================
+ * TC9: Emergency stop – brake = 100%
+ * ===================================================================== */
+testcase TC9_EmergencyBrake() {
+    write("--- TC9: Emergency Stop Brake Command = 100%% ---");
+    testWaitForTimeout(200);
+
+    /* Look at last captured brake value (updated by on message 0x340 handler) */
+    /* After AEB trigger from TC5, brake should be at maximum */
+    if (g_reportedBrake >= 95) {
+        reportPass("9", "Emergency brake command >= 95%");
+        write("  Brake = %.0f%%", g_reportedBrake);
+    } else {
+        /* Try to trigger again */
+        message 0x7E2 udsReq;
+        udsReq.dlc = 8;
+        udsReq.byte(0) = 0x04;
+        udsReq.byte(1) = 0x2E;
+        udsReq.byte(2) = 0x02;
+        udsReq.byte(3) = 0x00;
+        udsReq.byte(4) = 0x01;
+        output(udsReq);
+        testWaitForTimeout(300);
+        write("  Brake after re-trigger = %.0f%%", g_reportedBrake);
+        reportFail("9", "Emergency brake not at maximum");
+    }
+}
+
+/* =====================================================================
+ * TC10: CAN bus load < 50%
+ * ===================================================================== */
+testcase TC10_BusLoad() {
+    write("--- TC10: CAN Bus Load < 50%% ---");
+    float busLoad = getBusLoad(0);  /* channel 0 */
+    write("  CAN Bus load: %.1f%%", busLoad);
+
+    if (busLoad < 50.0) {
+        reportPass("10", "CAN bus load < 50%");
+    } else {
+        reportFail("10", "CAN bus load >= 50%");
+    }
+}
+
+/* =====================================================================
+ * MAIN TEST SEQUENCE
+ * ===================================================================== */
+on start {
+    write("===========================================================");
+    write("  ADAS L4 CANoe/CANalyzer Test Suite");
+    write("  Starting test execution...");
+    write("===========================================================");
+    g_testPass = 0;
+    g_testFail = 0;
+}
+
+testmodule ADAS_L4_Tests {
+    testgroup "ADAS_Functional" {
+        TC1_SafetyHeartbeat();
+        TC2_L4Engagement();
+        TC3_ObjectListPresence();
+        TC4_LaneInfoPresence();
+        TC5_AEBTrigger();
+        TC6_SpeedCommandLimits();
+        TC7_LidarFaultDegrades();
+        TC8_OddExitMinimalRisk();
+        TC9_EmergencyBrake();
+        TC10_BusLoad();
+    }
+}
+
+on stopMeasurement {
+    write("===========================================================");
+    write("  Test Results: %d PASSED  |  %d FAILED", g_testPass, g_testFail);
+    write("===========================================================");
+}

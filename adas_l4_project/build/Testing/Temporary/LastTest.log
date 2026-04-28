@@ -1,0 +1,115 @@
+Start testing: Apr 27 12:39 IST
+----------------------------------------------------------
+1/2 Testing: test_sensors
+1/2 Test: test_sensors
+Command: "/Users/macbook/Documents/capl/adas_l4_project/build/test_sensors"
+Directory: /Users/macbook/Documents/capl/adas_l4_project/build
+"test_sensors" start time: Apr 27 12:39 IST
+Output:
+----------------------------------------------------------
+===========================================================
+  test_sensors – ADAS L4 Sensor Layer Unit Tests
+===========================================================
+
+-- LiDAR --
+  [PASS] sensor.getHealth() == SensorHealth::INIT
+  [PASS] sensor.getHealth() == SensorHealth::OK
+  [PASS] obs.count < scan.count
+  [PASS] obs.count > 0
+  [PASS] sensor.getHealth() == SensorHealth::FAILED
+  [PASS] sensor.getObstacleScan().count == 0
+
+-- Radar --
+  [PASS] sensor.getHealth() == SensorHealth::INIT
+  [PASS] sensor.getSensorId() == static_cast<uint8_t>(0)
+  [PASS] sensor.getHealth() == SensorHealth::OK
+  [PASS] sensor.getScan().objects[0].range_m ~= 30.0f
+  [PASS] sensor.getScan().count == static_cast<uint8_t>(2)
+  [PASS] sensor.getHealth() == SensorHealth::FAILED
+
+-- Camera --
+  [PASS] sensor.getHealth() == SensorHealth::INIT
+  [PASS] sensor.getHealth() == SensorHealth::OK
+  [PASS] sensor.getFrame().lane_quality == static_cast<uint8_t>(80)
+  [PASS] sensor.getFrame().lane_width_m ~= 3.5f
+  [PASS] sensor.getHealth() == SensorHealth::FAILED
+
+-- IMU --
+  [PASS] sensor.getHealth() == SensorHealth::INIT
+  [PASS] sensor.getHealth() == SensorHealth::OK
+  [PASS] sensor.getData().ax ~= 0.5f
+  [PASS] sensor.getHealth() == SensorHealth::DEGRADED
+  [PASS] sensor.getHealth() == SensorHealth::DEGRADED
+  [PASS] sensor.getHealth() == SensorHealth::FAILED
+
+===========================================================
+  Results: 23 passed, 0 failed
+===========================================================
+<end of output>
+Test time =   0.29 sec
+----------------------------------------------------------
+Test Passed.
+"test_sensors" end time: Apr 27 12:39 IST
+"test_sensors" time elapsed: 00:00:00
+----------------------------------------------------------
+
+2/2 Testing: test_perception
+2/2 Test: test_perception
+Command: "/Users/macbook/Documents/capl/adas_l4_project/build/test_perception"
+Directory: /Users/macbook/Documents/capl/adas_l4_project/build
+"test_perception" start time: Apr 27 12:39 IST
+Output:
+----------------------------------------------------------
+===========================================================
+  test_perception – Perception/Planning/Control/Safety Tests
+===========================================================
+
+-- Sensor Fusion --
+  [PASS] f.getObjectList().count == static_cast<uint8_t>(0)
+  [PASS] f.getObjectList().count > 0
+  [PASS] ttc_positive
+  [PASS] ol.objects[0].x_m > 0.0f
+
+-- Lane Detector --
+  [PASS] est.quality > 0
+  [PASS] est.lane_width_m ~= 3.6f
+  [PASS] est.left_marking_valid
+  [PASS] est.right_marking_valid
+  [PASS] departed
+  [PASS] q2 < q1
+
+-- PID Controller --
+  [PASS] out ~= 0.0f
+  [PASS] out ~= 10.0f
+  [PASS] out ~= 50.0f
+  [PASS] pid.getIntegral() ~= 0.0f
+  [PASS] out2 > out1
+
+-- Safety Monitor --
+  [PASS] dec == SafetyDecision::NOMINAL
+  [PASS] dec == SafetyDecision::MINIMAL_RISK
+  [PASS] dec == SafetyDecision::EMERGENCY_STOP
+  [PASS] sm.isAebRequired()
+  [PASS] dec == SafetyDecision::DEGRADE_ODD
+
+-- ADAS FSM --
+  [PASS] fsm.getState() == AdasSystemState::POWER_OFF
+  [PASS] fsm.getState() == AdasSystemState::SELF_TEST
+  [PASS] fsm.getState() == AdasSystemState::STANDBY
+  [PASS] fsm.getState() == AdasSystemState::ACTIVE_L4
+  [PASS] fsm.getState() == AdasSystemState::SAFE_STOP || fsm.getState() == AdasSystemState::FAULT
+  [PASS] fsm.getState() == AdasSystemState::ACTIVE_L4
+  [PASS] fsm.getState() == AdasSystemState::MINIMAL_RISK
+
+===========================================================
+  Results: 27 passed, 0 failed
+===========================================================
+<end of output>
+Test time =   0.29 sec
+----------------------------------------------------------
+Test Passed.
+"test_perception" end time: Apr 27 12:39 IST
+"test_perception" time elapsed: 00:00:00
+----------------------------------------------------------
+
+End testing: Apr 27 12:39 IST

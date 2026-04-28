@@ -1,0 +1,376 @@
+/*
+ * CAN_UDS_Tester.can
+ * 
+ * CANalyzer / CANoe CAPL script for testing the ECU CAN/UDS implementation.
+ * 
+ * Covers:
+ *  - UDS DiagnosticSessionControl
+ *  - SecurityAccess (seed/key)
+ *  - ReadDataByIdentifier (VIN, RPM, Coolant Temp)
+ *  - WriteDataByIdentifier
+ *  - ReadDTCInformation
+ *  - ClearDiagnosticInformation
+ *  - TesterPresent (keep-alive)
+ *  - ECUReset
+ *  - CAN traffic monitoring
+ *
+ * Connections:
+ *  - CAN 1: Powertrain CAN @ 500kbps
+ *  - Tester sends to: 0x7E0 (physical) / 0x7DF (functional)
+ *  - ECU responds on: 0x7E8
+ *
+ * usage: Load in CANoe Test Module, assign variables, run
+ */
+
+// ─── Configuration Variables ─────────────────────────────────────────────────
+variables {
+  // CAN IDs
+  const long TESTER_PHYS_ID   = 0x7E0;  // Tester → ECU (physical)
+  const long TESTER_FUNC_ID   = 0x7DF;  // Tester → ECU (functional)
+  const long ECU_RESP_ID      = 0x7E8;  // ECU → Tester
+
+  // UDS SID byte
+  const byte SID_SESSION_CTRL  = 0x10;
+  const byte SID_ECU_RESET     = 0x11;
+  const byte SID_CLEAR_DTC     = 0x14;
+  const byte SID_READ_DTC      = 0x19;
+  const byte SID_RDBI          = 0x22;
+  const byte SID_WDBI          = 0x2E;
+  const byte SID_SECURITY      = 0x27;
+  const byte SID_TESTER_PRESENT= 0x3E;
+
+  // Session sub-functions
+  const byte SESSION_DEFAULT   = 0x01;
+  const byte SESSION_PROG      = 0x02;
+  const byte SESSION_EXTENDED  = 0x03;
+
+  // Global response buffer
+  message 0x7E8 gEcuResponse;
+  dword  gSeed;
+  dword  gKey;
+  int    gTestsPassed;
+  int    gTestsFailed;
+
+  // Timeout ms
+  const long UDS_TIMEOUT_MS = 500;
+}
+
+// ─── Utility: Send UDS Request (ISO-TP Single Frame) ─────────────────────────
+/*
+ * Sends a UDS request as a Single Frame ISO-TP message.
+ * data[] must be max 7 bytes (SF payload limit).
+ */
+void UDS_SendSingleFrame(long canId, byte data[], int len) {
+  message 0x7E0 txMsg;
+  txMsg.id = canId;
+  txMsg.dlc = len + 1;
+  txMsg.byte(0) = len & 0x0F;  // SF PCI
+  int i;
+  for (i = 0; i < len; i++) {
+    txMsg.byte(i + 1) = data[i];
+  }
+  output(txMsg);
+}
+
+// ─── Utility: Wait for ECU response ──────────────────────────────────────────
+int UDS_WaitResponse(long expectedId, long timeoutMs) {
+  // In CANoe: use testWaitForMessage
+  long result;
+  result = testWaitForMessage(expectedId, timeoutMs);
+  if (result == 0) {
+    write("[UDS] TIMEOUT waiting for response 0x%03X", expectedId);
+    return 0;
+  }
+  return 1;
+}
+
+// ─── Test: DiagnosticSessionControl ──────────────────────────────────────────
+testcase TC_DiagnosticSessionControl_Extended() {
+  byte req[2];
+  req[0] = SID_SESSION_CTRL;
+  req[1] = SESSION_EXTENDED;
+
+  testStep("DSC", "Enter Extended Diagnostic Session (0x10 03)");
+  UDS_SendSingleFrame(TESTER_PHYS_ID, req, 2);
+
+  if (!UDS_WaitResponse(ECU_RESP_ID, UDS_TIMEOUT_MS)) {
+    testStepFail("DSC", "No response from ECU");
+    gTestsFailed++;
+    return;
+  }
+
+  // Check positive response: 0x50 03
+  if (gEcuResponse.byte(1) != 0x50 || gEcuResponse.byte(2) != SESSION_EXTENDED) {
+    testStepFail("DSC", "Wrong session response: 0x%02X 0x%02X",
+                  gEcuResponse.byte(1), gEcuResponse.byte(2));
+    gTestsFailed++;
+    return;
+  }
+  testStepPass("DSC", "Extended session entered. P2=0x%02X%02X P2*=0x%02X%02X",
+               gEcuResponse.byte(3), gEcuResponse.byte(4),
+               gEcuResponse.byte(5), gEcuResponse.byte(6));
+  gTestsPassed++;
+}
+
+// ─── Test: SecurityAccess ─────────────────────────────────────────────────────
+testcase TC_SecurityAccess_Level1() {
+  byte req[2];
+  testStep("SA", "Security Access – Request Seed (level 01)");
+
+  // Step 1: Request Seed
+  req[0] = SID_SECURITY;
+  req[1] = 0x01;  // Request seed for level 1
+  UDS_SendSingleFrame(TESTER_PHYS_ID, req, 2);
+
+  if (!UDS_WaitResponse(ECU_RESP_ID, UDS_TIMEOUT_MS)) {
+    testStepFail("SA", "No seed response");
+    gTestsFailed++;
+    return;
+  }
+  if (gEcuResponse.byte(1) != 0x67 || gEcuResponse.byte(2) != 0x01) {
+    testStepFail("SA", "Invalid seed response: 0x%02X", gEcuResponse.byte(1));
+    gTestsFailed++;
+    return;
+  }
+
+  // Extract seed
+  gSeed = ((dword)gEcuResponse.byte(3) << 24) |
+          ((dword)gEcuResponse.byte(4) << 16) |
+          ((dword)gEcuResponse.byte(5) <<  8) |
+           (dword)gEcuResponse.byte(6);
+  write("[SA] Received seed: 0x%08X", gSeed);
+
+  // Calculate key: Seed XOR 0x5A5A5A5A (must match ECU algorithm)
+  gKey = gSeed ^ 0x5A5A5A5A;
+  write("[SA] Calculated key: 0x%08X", gKey);
+
+  // Step 2: Send Key
+  byte keyReq[6];
+  keyReq[0] = SID_SECURITY;
+  keyReq[1] = 0x02;  // Send key for level 1
+  keyReq[2] = (gKey >> 24) & 0xFF;
+  keyReq[3] = (gKey >> 16) & 0xFF;
+  keyReq[4] = (gKey >>  8) & 0xFF;
+  keyReq[5] =  gKey        & 0xFF;
+  UDS_SendSingleFrame(TESTER_PHYS_ID, keyReq, 6);
+
+  if (!UDS_WaitResponse(ECU_RESP_ID, UDS_TIMEOUT_MS)) {
+    testStepFail("SA", "No key response");
+    gTestsFailed++;
+    return;
+  }
+  if (gEcuResponse.byte(1) != 0x67 || gEcuResponse.byte(2) != 0x02) {
+    testStepFail("SA", "Security access denied. NRC=0x%02X", gEcuResponse.byte(3));
+    gTestsFailed++;
+    return;
+  }
+  testStepPass("SA", "Security access GRANTED for level 1");
+  gTestsPassed++;
+}
+
+// ─── Test: ReadDataByIdentifier – VIN ─────────────────────────────────────────
+testcase TC_RDBI_VIN() {
+  byte req[3];
+  req[0] = SID_RDBI;
+  req[1] = 0xF1;
+  req[2] = 0x90;  // DID 0xF190 = VIN
+
+  testStep("RDBI", "Read VIN (DID 0xF190)");
+  UDS_SendSingleFrame(TESTER_PHYS_ID, req, 3);
+
+  if (!UDS_WaitResponse(ECU_RESP_ID, UDS_TIMEOUT_MS)) {
+    testStepFail("RDBI", "No response for VIN");
+    gTestsFailed++;
+    return;
+  }
+  if (gEcuResponse.byte(1) != 0x62) {
+    testStepFail("RDBI", "Negative response: 0x%02X 0x%02X NRC=0x%02X",
+                  gEcuResponse.byte(1), gEcuResponse.byte(2), gEcuResponse.byte(3));
+    gTestsFailed++;
+    return;
+  }
+
+  // Extract VIN string (17 bytes at offset 3)
+  char vin[18];
+  int i;
+  for (i = 0; i < 17; i++) {
+    vin[i] = gEcuResponse.byte(3 + i);
+  }
+  vin[17] = '\0';
+  testStepPass("RDBI", "VIN = '%s'", vin);
+  gTestsPassed++;
+}
+
+// ─── Test: ReadDataByIdentifier – Engine RPM (custom DID 0xF4AB) ─────────────
+testcase TC_RDBI_EngineRPM() {
+  byte req[3];
+  req[0] = SID_RDBI;
+  req[1] = 0xF4;
+  req[2] = 0xAB;  // Custom DID: Engine RPM
+
+  testStep("RDBI_RPM", "Read Engine RPM (DID 0xF4AB) – requires Extended Session");
+  UDS_SendSingleFrame(TESTER_PHYS_ID, req, 3);
+
+  if (!UDS_WaitResponse(ECU_RESP_ID, UDS_TIMEOUT_MS)) {
+    testStepFail("RDBI_RPM", "No response");
+    gTestsFailed++;
+    return;
+  }
+  if (gEcuResponse.byte(1) == 0x7F) {
+    write("[RDBI_RPM] NRC: 0x%02X – likely session issue", gEcuResponse.byte(3));
+    testStepFail("RDBI_RPM", "Negative response");
+    gTestsFailed++;
+    return;
+  }
+  int rpm_raw = ((int)gEcuResponse.byte(3) << 8) | gEcuResponse.byte(4);
+  testStepPass("RDBI_RPM", "Engine RPM raw = %d (physical = %d RPM)", rpm_raw, rpm_raw);
+  gTestsPassed++;
+}
+
+// ─── Test: TesterPresent ──────────────────────────────────────────────────────
+testcase TC_TesterPresent() {
+  byte req[2];
+  req[0] = SID_TESTER_PRESENT;
+  req[1] = 0x00;  // Sub-function 0x00
+
+  testStep("TP", "TesterPresent keep-alive");
+  UDS_SendSingleFrame(TESTER_FUNC_ID, req, 2);
+  // Suppress positive response flag NOT set, so we expect 0x7E 00
+  if (!UDS_WaitResponse(ECU_RESP_ID, UDS_TIMEOUT_MS)) {
+    testStepFail("TP", "No TesterPresent response");
+    gTestsFailed++;
+    return;
+  }
+  if (gEcuResponse.byte(1) != 0x7E) {
+    testStepFail("TP", "Wrong response SID: 0x%02X", gEcuResponse.byte(1));
+    gTestsFailed++;
+    return;
+  }
+  testStepPass("TP", "TesterPresent accepted");
+  gTestsPassed++;
+}
+
+// ─── Test: ReadDTCInformation ─────────────────────────────────────────────────
+testcase TC_ReadDTC_ByStatusMask() {
+  byte req[3];
+  req[0] = SID_READ_DTC;
+  req[1] = 0x02;   // reportDTCByStatusMask
+  req[2] = 0xFF;   // All bits
+
+  testStep("ReadDTC", "Read all DTCs (0x19 02 FF)");
+  UDS_SendSingleFrame(TESTER_PHYS_ID, req, 3);
+
+  if (!UDS_WaitResponse(ECU_RESP_ID, UDS_TIMEOUT_MS)) {
+    testStepFail("ReadDTC", "No response");
+    gTestsFailed++;
+    return;
+  }
+  if (gEcuResponse.byte(1) == 0x7F) {
+    testStepFail("ReadDTC", "NRC=0x%02X", gEcuResponse.byte(3));
+    gTestsFailed++;
+    return;
+  }
+  testStepPass("ReadDTC", "DTC read successful – response length = %d", gEcuResponse.dlc);
+  gTestsPassed++;
+}
+
+// ─── Test: ClearDTC ───────────────────────────────────────────────────────────
+testcase TC_ClearAllDTCs() {
+  byte req[4];
+  req[0] = SID_CLEAR_DTC;
+  req[1] = 0xFF;
+  req[2] = 0xFF;
+  req[3] = 0xFF;  // group = all
+
+  testStep("ClearDTC", "Clear all DTCs (0x14 FF FF FF)");
+  UDS_SendSingleFrame(TESTER_PHYS_ID, req, 4);
+
+  if (!UDS_WaitResponse(ECU_RESP_ID, UDS_TIMEOUT_MS)) {
+    testStepFail("ClearDTC", "No response");
+    gTestsFailed++;
+    return;
+  }
+  if (gEcuResponse.byte(1) != 0x54) {
+    testStepFail("ClearDTC", "Wrong response: 0x%02X", gEcuResponse.byte(1));
+    gTestsFailed++;
+    return;
+  }
+  testStepPass("ClearDTC", "All DTCs cleared successfully");
+  gTestsPassed++;
+}
+
+// ─── Test: ECUReset ───────────────────────────────────────────────────────────
+testcase TC_ECUReset_Soft() {
+  byte req[2];
+  req[0] = SID_ECU_RESET;
+  req[1] = 0x03;  // Soft reset
+
+  testStep("Reset", "ECU Soft Reset (0x11 03)");
+  UDS_SendSingleFrame(TESTER_PHYS_ID, req, 2);
+
+  if (!UDS_WaitResponse(ECU_RESP_ID, UDS_TIMEOUT_MS)) {
+    testStepFail("Reset", "No reset response");
+    gTestsFailed++;
+    return;
+  }
+  if (gEcuResponse.byte(1) != 0x51 || gEcuResponse.byte(2) != 0x03) {
+    testStepFail("Reset", "Wrong response");
+    gTestsFailed++;
+    return;
+  }
+  testStepPass("Reset", "ECU soft reset acknowledged");
+  gTestsPassed++;
+}
+
+// ─── Monitoring: CAN Traffic ──────────────────────────────────────────────────
+on message 0x100 {   // Engine Status frame from ECU
+  float rpm_raw  = (this.byte(0) << 8) | this.byte(1);
+  float rpm      = rpm_raw * 0.25;
+  int   coolant  = (int)this.byte(2) - 40;
+  float load     = this.byte(3) * 0.392157;
+  float throttle = this.byte(4) * 0.392157;
+  bit   ign_on   = this.byte(5) & 0x01;
+  bit   eng_run  = (this.byte(5) >> 1) & 0x01;
+  float batt_v   = ((this.byte(6) << 8) | this.byte(7)) / 100.0;
+
+  write("[CAN 0x100] RPM=%.0f  CoolantTemp=%d°C  Load=%.1f%%  Throttle=%.1f%%  Batt=%.2fV",
+        rpm, coolant, load, throttle, batt_v);
+}
+
+on message 0x200 {   // Vehicle Status
+  write("[CAN 0x200] VehicleSpeed=%d km/h", this.byte(0));
+}
+
+// Capture ECU response into gEcuResponse
+on message 0x7E8 {
+  gEcuResponse = this;
+}
+
+// ─── Main Test Suite Entry Point ──────────────────────────────────────────────
+mainTest() {
+  gTestsPassed = 0;
+  gTestsFailed = 0;
+
+  write("═══════════════════════════════════════════");
+  write("  ECU UDS Test Suite – Running...");
+  write("═══════════════════════════════════════════");
+
+  // Wait for ECU to boot
+  testWait(500);
+
+  // Run test cases in logical order
+  TC_DiagnosticSessionControl_Extended();
+  TC_SecurityAccess_Level1();
+  TC_RDBI_VIN();
+  TC_TesterPresent();
+
+  // These require extended session (already entered above)
+  TC_RDBI_EngineRPM();
+  TC_ReadDTC_ByStatusMask();
+  TC_ClearAllDTCs();
+  TC_ECUReset_Soft();
+
+  write("═══════════════════════════════════════════");
+  write("  RESULTS: %d PASSED  |  %d FAILED", gTestsPassed, gTestsFailed);
+  write("═══════════════════════════════════════════");
+}

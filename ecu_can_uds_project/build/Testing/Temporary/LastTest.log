@@ -1,0 +1,191 @@
+Start testing: Apr 27 12:10 IST
+----------------------------------------------------------
+1/2 Testing: CANBusTests
+1/2 Test: CANBusTests
+Command: "/Users/macbook/Documents/capl/ecu_can_uds_project/build/test_can_bus"
+Directory: /Users/macbook/Documents/capl/ecu_can_uds_project/build
+"CANBusTests" start time: Apr 27 12:10 IST
+Output:
+----------------------------------------------------------
+═══════════════════════════════════════════
+  CAN Bus + Frame Unit Tests
+═══════════════════════════════════════════
+[TEST] test_canframe_default_constructor
+[TEST] test_canframe_constructor_with_data
+[TEST] test_canframe_invalid_dlc
+[TEST] test_canframe_match_id_exact
+[TEST] test_canframe_match_id_masked
+[TEST] test_canframe_get_byte_out_of_bounds
+[TEST] test_canframe_reset
+[TEST] test_canframe_setdata
+[TEST] test_canframe_setdata_too_large
+[TEST] test_canbus_initialize_shutdown
+[CANBus] Channel 'TestCAN' initialized @ 500000 bps
+[CANBus] Channel 'TestCAN' shutdown
+[TEST] test_canbus_transmit_basic
+[CANBus] Channel 'TestCAN' initialized @ 500000 bps
+[CANBus][TX] ID=0x100 DLC=4 Data=01 02 03 04 
+[CANBus] Channel 'TestCAN' shutdown
+[TEST] test_canbus_transmit_busoff
+[CANBus] Channel 'TestCAN' initialized @ 500000 bps
+[CANBus] Channel 'TestCAN' shutdown
+[TEST] test_canbus_inject_and_receive_frame
+[CANBus] Channel 'TestCAN' initialized @ 500000 bps
+[CANBus] Channel 'TestCAN' shutdown
+[TEST] test_canbus_rx_callback_with_filter
+[CANBus] Channel 'TestCAN' initialized @ 500000 bps
+[CANBus] Channel 'TestCAN' shutdown
+[TEST] test_canbus_unregister_callback
+[CANBus] Channel 'TestCAN' initialized @ 500000 bps
+[CANBus] Channel 'TestCAN' shutdown
+[TEST] test_canbus_stats_rx_count
+[CANBus] Channel 'TestCAN' initialized @ 500000 bps
+[CANBus] Channel 'TestCAN' shutdown
+═══════════════════════════════════════════
+  Results: 16 passed, 0 failed
+═══════════════════════════════════════════
+<end of output>
+Test time =   0.00 sec
+----------------------------------------------------------
+Test Passed.
+"CANBusTests" end time: Apr 27 12:10 IST
+"CANBusTests" time elapsed: 00:00:00
+----------------------------------------------------------
+
+2/2 Testing: DTCManagerTests
+2/2 Test: DTCManagerTests
+Command: "/Users/macbook/Documents/capl/ecu_can_uds_project/build/test_dtc_manager"
+Directory: /Users/macbook/Documents/capl/ecu_can_uds_project/build
+"DTCManagerTests" start time: Apr 27 12:10 IST
+Output:
+----------------------------------------------------------
+═══════════════════════════════════════════
+  DTC Manager + ECU Core Unit Tests
+═══════════════════════════════════════════
+[TEST] test_dtc_set_and_query
+[DTCManager] DTC SET: 0x0C0300  Status=0x27  Count=1
+[TEST] test_dtc_not_found_returns_zero
+[TEST] test_dtc_confirmed_after_two_failures
+[DTCManager] DTC SET: 0x0AAAAA  Status=0x27  Count=1
+[DTCManager] DTC SET: 0x0AAAAA  Status=0xAF  Count=2
+[TEST] test_dtc_clear_failed
+[DTCManager] DTC SET: 0x100000  Status=0x27  Count=1
+[TEST] test_dtc_clear_all
+[DTCManager] DTC SET: 0x100000  Status=0x27  Count=1
+[DTCManager] DTC SET: 0x200000  Status=0x27  Count=1
+[DTCManager] DTC SET: 0x300000  Status=0x27  Count=1
+[DTCManager] All DTCs cleared
+[TEST] test_dtc_count_by_status_mask
+[DTCManager] DTC SET: 0x0AAAA0  Status=0x27  Count=1
+[DTCManager] DTC SET: 0x0BBBB0  Status=0x27  Count=1
+[DTCManager] DTC SET: 0x0BBBB0  Status=0xAF  Count=2
+[DTCManager] DTC SET: 0x0AAAA0  Status=0xAF  Count=2
+[TEST] test_dtc_get_by_status_mask
+[DTCManager] DTC SET: 0x111111  Status=0x27  Count=1
+[DTCManager] DTC SET: 0x222222  Status=0x27  Count=1
+[TEST] test_dtc_snapshot_capture
+[DTCManager] DTC SET: 0xF00001  Status=0x27  Count=1
+[TEST] test_dtc_snapshot_not_found
+[TEST] test_dtc_drive_cycle_processing
+[DTCManager] DTC SET: 0x555500  Status=0x27  Count=1
+[TEST] test_dtc_max_storage
+[DTCManager] DTC SET: 0x100000  Status=0x27  Count=1
+[DTCManager] DTC SET: 0x100001  Status=0x27  Count=1
+[DTCManager] DTC SET: 0x100002  Status=0x27  Count=1
+[DTCManager] DTC SET: 0x100003  Status=0x27  Count=1
+[DTCManager] DTC SET: 0x100004  Status=0x27  Count=1
+[DTCManager] DTC SET: 0x100005  Status=0x27  Count=1
+[DTCManager] DTC SET: 0x100006  Status=0x27  Count=1
+[DTCManager] DTC SET: 0x100007  Status=0x27  Count=1
+[DTCManager] DTC SET: 0x100008  Status=0x27  Count=1
+[DTCManager] DTC SET: 0x100009  Status=0x27  Count=1
+[DTCManager] DTC SET: 0x10000A  Status=0x27  Count=1
+[DTCManager] DTC SET: 0x10000B  Status=0x27  Count=1
+[DTCManager] DTC SET: 0x10000C  Status=0x27  Count=1
+[DTCManager] DTC SET: 0x10000D  Status=0x27  Count=1
+[DTCManager] DTC SET: 0x10000E  Status=0x27  Count=1
+[DTCManager] DTC SET: 0x10000F  Status=0x27  Count=1
+[DTCManager] DTC SET: 0x100010  Status=0x27  Count=1
+[DTCManager] DTC SET: 0x100011  Status=0x27  Count=1
+[DTCManager] DTC SET: 0x100012  Status=0x27  Count=1
+[DTCManager] DTC SET: 0x100013  Status=0x27  Count=1
+[DTCManager] DTC SET: 0x100014  Status=0x27  Count=1
+[DTCManager] DTC SET: 0x100015  Status=0x27  Count=1
+[DTCManager] DTC SET: 0x100016  Status=0x27  Count=1
+[DTCManager] DTC SET: 0x100017  Status=0x27  Count=1
+[DTCManager] DTC SET: 0x100018  Status=0x27  Count=1
+[DTCManager] DTC SET: 0x100019  Status=0x27  Count=1
+[DTCManager] DTC SET: 0x10001A  Status=0x27  Count=1
+[DTCManager] DTC SET: 0x10001B  Status=0x27  Count=1
+[DTCManager] DTC SET: 0x10001C  Status=0x27  Count=1
+[DTCManager] DTC SET: 0x10001D  Status=0x27  Count=1
+[DTCManager] DTC SET: 0x10001E  Status=0x27  Count=1
+[DTCManager] DTC SET: 0x10001F  Status=0x27  Count=1
+[DTCManager] DTC SET: 0x100020  Status=0x27  Count=1
+[DTCManager] DTC SET: 0x100021  Status=0x27  Count=1
+[DTCManager] DTC SET: 0x100022  Status=0x27  Count=1
+[DTCManager] DTC SET: 0x100023  Status=0x27  Count=1
+[DTCManager] DTC SET: 0x100024  Status=0x27  Count=1
+[DTCManager] DTC SET: 0x100025  Status=0x27  Count=1
+[DTCManager] DTC SET: 0x100026  Status=0x27  Count=1
+[DTCManager] DTC SET: 0x100027  Status=0x27  Count=1
+[DTCManager] DTC SET: 0x100028  Status=0x27  Count=1
+[DTCManager] DTC SET: 0x100029  Status=0x27  Count=1
+[DTCManager] DTC SET: 0x10002A  Status=0x27  Count=1
+[DTCManager] DTC SET: 0x10002B  Status=0x27  Count=1
+[DTCManager] DTC SET: 0x10002C  Status=0x27  Count=1
+[DTCManager] DTC SET: 0x10002D  Status=0x27  Count=1
+[DTCManager] DTC SET: 0x10002E  Status=0x27  Count=1
+[DTCManager] DTC SET: 0x10002F  Status=0x27  Count=1
+[DTCManager] DTC SET: 0x100030  Status=0x27  Count=1
+[DTCManager] DTC SET: 0x100031  Status=0x27  Count=1
+[DTCManager] WARNING: DTC storage full! Cannot set 0x999999
+[TEST] test_dtc_duplicate_code_reuses_slot
+[DTCManager] DTC SET: 0xABCDEF  Status=0x27  Count=1
+[DTCManager] DTC SET: 0xABCDEF  Status=0xAF  Count=2
+[TEST] test_ecu_lifecycle
+[ECU:TestECU] Initializing...
+[ECU:TestECU] State: POWER_OFF → BOOT
+[CANBus] Channel 'TestCAN' initialized @ 500000 bps
+[UDSServer] Initialized. PhysReq=0x7E0 FuncReq=0x7DF Resp=0x7E8
+[ECU:TestECU] Registered 7 diagnostic DIDs
+[ECU:TestECU] State: BOOT → INIT
+[ECU:TestECU] Initialization complete
+[ECU:TestECU] State: INIT → RUNNING
+[CANBus][TX] ID=0x100 DLC=8 Data=0C 80 3C 00 00 03 04 B0 
+[CANBus][TX] ID=0x100 DLC=8 Data=0C 80 3C 00 00 03 04 B0 
+[CANBus][TX] ID=0x100 DLC=8 Data=0C 80 3C 00 00 03 04 B0 
+[CANBus][TX] ID=0x100 DLC=8 Data=0C 80 3C 00 00 03 04 B0 
+[CANBus][TX] ID=0x100 DLC=8 Data=0C 80 3C 00 00 03 04 B0 
+[ECU:TestECU] State: RUNNING → SHUTDOWN
+[CANBus] Channel 'TestCAN' shutdown
+[ECU:TestECU] State: SHUTDOWN → POWER_OFF
+[ECU:TestECU] Shutdown complete
+[TEST] test_ecu_fault_injection
+[ECU:FaultTestECU] Initializing...
+[ECU:FaultTestECU] State: POWER_OFF → BOOT
+[CANBus] Channel 'FaultTestCAN' initialized @ 500000 bps
+[UDSServer] Initialized. PhysReq=0x7E0 FuncReq=0x7DF Resp=0x7E8
+[ECU:FaultTestECU] Registered 7 diagnostic DIDs
+[ECU:FaultTestECU] State: BOOT → INIT
+[ECU:FaultTestECU] Initialization complete
+[ECU:FaultTestECU] State: INIT → RUNNING
+[CANBus][TX] ID=0x100 DLC=8 Data=00 00 00 00 00 03 04 B0 
+[CANBus][TX] ID=0x100 DLC=8 Data=00 00 00 00 00 03 04 B0 
+[DTCManager] DTC SET: 0x0C0300  Status=0x27  Count=1
+[ECU:FaultTestECU] State: RUNNING → SHUTDOWN
+[CANBus] Channel 'FaultTestCAN' shutdown
+[ECU:FaultTestECU] State: SHUTDOWN → POWER_OFF
+[ECU:FaultTestECU] Shutdown complete
+═══════════════════════════════════════════
+  Results: 14 passed, 0 failed
+═══════════════════════════════════════════
+<end of output>
+Test time =   0.00 sec
+----------------------------------------------------------
+Test Passed.
+"DTCManagerTests" end time: Apr 27 12:10 IST
+"DTCManagerTests" time elapsed: 00:00:00
+----------------------------------------------------------
+
+End testing: Apr 27 12:10 IST

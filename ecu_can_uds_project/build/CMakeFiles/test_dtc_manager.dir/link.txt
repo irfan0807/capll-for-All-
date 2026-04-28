@@ -1,0 +1,1 @@
+/usr/bin/c++ -g -Wl,-search_paths_first -Wl,-headerpad_max_install_names CMakeFiles/test_dtc_manager.dir/tests/test_dtc_manager.cpp.o -o test_dtc_manager  libautomotive_ecu.a
