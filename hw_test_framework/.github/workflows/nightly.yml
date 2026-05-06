@@ -1,0 +1,121 @@
+name: Nightly — Integration & System Tests
+
+on:
+  schedule:
+    - cron: "0 2 * * *"          # 02:00 UTC every night
+  workflow_dispatch:              # manual trigger
+    inputs:
+      interface:
+        description: "CAN interface (vcan0 / socketcan)"
+        required: false
+        default: "vcan0"
+
+defaults:
+  run:
+    working-directory: hw_test_framework
+
+jobs:
+  # ── vcan0 integration tests ──────────────────────────────────────────────────
+  integration-vcan:
+    name: Integration tests (vcan0)
+    runs-on: ubuntu-22.04
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+
+      - name: Install system & Python dependencies
+        run: |
+          sudo apt-get update -y
+          sudo apt-get install -y can-utils linux-modules-extra-$(uname -r) || true
+          pip install -r requirements.txt pytest pytest-cov
+
+      - name: Set up vcan0
+        run: |
+          sudo modprobe vcan || true
+          sudo ip link add dev vcan0 type vcan   || true
+          sudo ip link set up vcan0              || true
+          ip link show vcan0
+
+      - name: Start ECU simulator (isotpsim)
+        run: |
+          # Launch a background ISO-TP echo simulator so UDS calls succeed
+          isotpsim -s 7E8 -d 7DF vcan0 &
+          echo $! > /tmp/sim.pid
+          sleep 0.5
+
+      - name: Run integration tests
+        run: |
+          pytest tests/integration/ \
+            -v \
+            --tb=short \
+            --junitxml=reports/junit-integration.xml \
+            -k "not programming_session"    # skip tests requiring real ECU auth
+
+      - name: Stop simulator
+        if: always()
+        run: kill $(cat /tmp/sim.pid) 2>/dev/null || true
+
+      - name: Upload results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: integration-test-results
+          path: hw_test_framework/reports/
+
+  # ── Full unit + integration summary ──────────────────────────────────────────
+  nightly-summary:
+    name: Nightly summary report
+    runs-on: ubuntu-22.04
+    needs: [integration-vcan]
+    if: always()
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/download-artifact@v4
+        with:
+          path: all-reports/
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install dependencies
+        run: pip install junitparser
+
+      - name: Merge JUnit XMLs and print summary
+        run: |
+          python - <<'EOF'
+          from junitparser import JUnitXml, TestSuite
+          import pathlib, sys
+
+          xml = JUnitXml()
+          for f in pathlib.Path("all-reports").rglob("*.xml"):
+              xml += JUnitXml.fromfile(str(f))
+
+          total = failures = errors = skipped = 0
+          for suite in xml:
+              total    += suite.tests
+              failures += suite.failures
+              errors   += suite.errors
+              skipped  += suite.skipped
+
+          print(f"Nightly: {total} tests | "
+                f"{total-failures-errors-skipped} passed | "
+                f"{failures} failed | {errors} errors | {skipped} skipped")
+          sys.exit(1 if (failures + errors) > 0 else 0)
+          EOF
+
+      - name: Post Slack notification
+        if: failure()
+        uses: rtCamp/action-slack-notify@v2
+        env:
+          SLACK_WEBHOOK: ${{ secrets.SLACK_NIGHTLY_WEBHOOK }}
+          SLACK_TITLE:   "Nightly test FAILED"
+          SLACK_MESSAGE: "Check GitHub Actions for details."
+          SLACK_COLOR:   "#dc3545"

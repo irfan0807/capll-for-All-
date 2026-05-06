@@ -1,0 +1,159 @@
+name: CI — Build & Unit Tests
+
+on:
+  push:
+    branches: ["main", "develop", "feature/**"]
+    paths:
+      - "hw_test_framework/**"
+      - ".github/workflows/ci.yml"
+  pull_request:
+    branches: ["main", "develop"]
+    paths:
+      - "hw_test_framework/**"
+
+defaults:
+  run:
+    working-directory: hw_test_framework
+
+jobs:
+  # ── C++ build + ctest ────────────────────────────────────────────────────────
+  cpp-build:
+    name: C++ build (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-22.04]
+        build_type: [Release, Debug]
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install system dependencies
+        run: |
+          sudo apt-get update -y
+          sudo apt-get install -y cmake ninja-build libpybind11-dev python3-dev can-utils
+
+      - name: Configure CMake
+        run: |
+          cmake -B build \
+            -G Ninja \
+            -DCMAKE_BUILD_TYPE=${{ matrix.build_type }} \
+            -DBUILD_PYTHON_BINDINGS=OFF \
+            -DBUILD_TESTS=ON
+
+      - name: Build
+        run: cmake --build build --parallel $(nproc)
+
+      - name: CTest
+        run: ctest --test-dir build --output-on-failure --parallel $(nproc)
+
+  # ── Python lint ──────────────────────────────────────────────────────────────
+  python-lint:
+    name: Python lint
+    runs-on: ubuntu-22.04
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+
+      - name: Install lint tools
+        run: pip install ruff mypy
+
+      - name: Ruff (lint + format check)
+        working-directory: hw_test_framework/python
+        run: |
+          ruff check hw_test_framework/ tests/ --select E,W,F,I
+          ruff format --check hw_test_framework/ tests/
+
+      - name: Mypy (type check)
+        working-directory: hw_test_framework/python
+        run: |
+          mypy hw_test_framework/ --ignore-missing-imports --strict-optional
+
+  # ── Python unit tests ────────────────────────────────────────────────────────
+  python-unit-tests:
+    name: Python unit tests (Python ${{ matrix.python-version }})
+    runs-on: ubuntu-22.04
+    needs: [cpp-build, python-lint]
+
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ["3.9", "3.10", "3.11", "3.12"]
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+          cache: pip
+
+      - name: Install Python dependencies
+        working-directory: hw_test_framework
+        run: pip install -r requirements.txt pytest pytest-cov
+
+      - name: Run unit tests
+        working-directory: hw_test_framework
+        run: |
+          pytest tests/unit/ \
+            -v \
+            --tb=short \
+            --cov=python/hw_test_framework \
+            --cov-report=xml:reports/coverage.xml \
+            --cov-report=term-missing \
+            --junitxml=reports/junit-unit-${{ matrix.python-version }}.xml
+
+      - name: Upload test results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: unit-test-results-py${{ matrix.python-version }}
+          path: hw_test_framework/reports/
+
+      - name: Upload coverage to Codecov
+        if: matrix.python-version == '3.11'
+        uses: codecov/codecov-action@v4
+        with:
+          files: hw_test_framework/reports/coverage.xml
+          fail_ci_if_error: false
+
+  # ── pybind11 bindings (optional) ─────────────────────────────────────────────
+  pybind-build:
+    name: pybind11 bindings
+    runs-on: ubuntu-22.04
+    needs: cpp-build
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+
+      - name: Install build deps
+        run: |
+          sudo apt-get update -y
+          sudo apt-get install -y cmake ninja-build
+          pip install pybind11 setuptools wheel
+
+      - name: Build pybind11 module
+        working-directory: hw_test_framework
+        run: |
+          cmake -B build_bindings \
+            -G Ninja \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DBUILD_PYTHON_BINDINGS=ON \
+            -Dpybind11_DIR=$(python -c "import pybind11; print(pybind11.get_cmake_dir())")
+          cmake --build build_bindings --parallel $(nproc)
+
+      - name: Smoke-test import
+        working-directory: hw_test_framework
+        run: |
+          PYTHONPATH=build_bindings python -c "import hw_adapter_cpp; print('OK:', dir(hw_adapter_cpp))"

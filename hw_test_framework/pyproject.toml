@@ -1,0 +1,66 @@
+[build-system]
+requires = ["setuptools>=68", "wheel", "pybind11>=2.11"]
+build-backend = "setuptools.backends.legacy:build"
+
+[project]
+name            = "hw-test-framework"
+version         = "1.0.0"
+description     = "Multi-layer hardware/ADAS ECU validation framework (CAN, UDS, signal filters)"
+readme          = "README.md"
+license         = { text = "Internal" }
+requires-python = ">=3.9"
+
+dependencies = [
+    "python-can>=4.0",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=7.4",
+    "pytest-cov>=4.1",
+    "ruff>=0.1",
+    "mypy>=1.5",
+    "jinja2>=3.1",       # html reporter template (future)
+    "junitparser>=2.8",  # nightly merge script
+]
+
+[project.scripts]
+hw-test = "hw_test_framework.framework.test_runner:main"
+
+[tool.setuptools.packages.find]
+where = ["python"]
+
+[tool.setuptools.package-dir]
+"" = "python"
+
+# ── ruff ──────────────────────────────────────────────────────────────────────
+[tool.ruff]
+line-length    = 100
+target-version = "py39"
+select         = ["E", "W", "F", "I", "UP"]
+ignore         = ["E501"]   # line-length enforced by formatter
+
+[tool.ruff.isort]
+known-first-party = ["hw_test_framework"]
+
+# ── mypy ─────────────────────────────────────────────────────────────────────
+[tool.mypy]
+python_version         = "3.9"
+strict_optional        = true
+warn_return_any        = true
+warn_unused_ignores    = true
+ignore_missing_imports = true
+
+# ── pytest ────────────────────────────────────────────────────────────────────
+[tool.pytest.ini_options]
+testpaths    = ["tests"]
+addopts      = "-v --tb=short"
+filterwarnings = ["ignore::DeprecationWarning"]
+
+[tool.coverage.run]
+source = ["hw_test_framework"]
+omit   = ["*/tests/*", "*/bindings/*"]
+
+[tool.coverage.report]
+show_missing = true
+fail_under   = 70

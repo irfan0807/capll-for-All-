@@ -1,0 +1,17 @@
+# Runtime
+python-can>=4.0
+
+# Build (optional — only needed if building the C++ extension)
+# pybind11>=2.11
+# cmake>=3.18
+
+# Testing
+pytest>=7.4
+pytest-cov>=4.1
+
+# Lint / type-check
+ruff>=0.1
+mypy>=1.5
+
+# Nightly report merge
+junitparser>=2.8
