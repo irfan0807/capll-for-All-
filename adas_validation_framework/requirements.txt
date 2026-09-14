@@ -1,0 +1,13 @@
+# Core CAN stack
+python-can>=4.3.0
+cantools>=39.4.0
+
+# Test framework
+pytest>=7.4.0
+pytest-html>=4.1.0
+pytest-timeout>=2.2.0
+pytest-xdist>=3.5.0          # optional: parallel test execution
+allure-pytest>=2.13.5
+
+# Logging
+colorlog>=6.8.0
