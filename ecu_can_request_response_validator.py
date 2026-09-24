@@ -1,38 +1,56 @@
 """
-CAN Request / Response Automation using python-can
-===================================================
+W501 CAPL -> Python-CAN ECU Validation Automation
+=================================================
 
-Purpose
--------
-Send CAN requests to an ECU and automatically validate the ECU response.
+SOURCE OF TRUTH
+---------------
+This implementation follows the supplied W501 CAPL structure:
 
-Example:
-    TX 0x100 -> ECU
-    RX 0x101 -> expected positive response
-                  OR
-    RX 0x101 -> negative response
+TX groups:
+    10 ms   : 0x142, 0x2CC, 0x124, 0x108, 0x10D, 0x126, 0x136, 0x282, 0x114
+    20 ms   : 0x130, 0x278, 0x2C0, 0x227, 0x170
+    50 ms   : 0x326
+    100 ms  : 0x214, 0x233, 0x342, 0x348, 0x220, 0x229
+    200 ms  : 0x310, 0x57E, 0x57D
+    500 ms  : 0x308, 0x3CA, 0x21F, 0x3C0, 0x3CB
+    1000 ms : 0x666
+    250 ms  : 0x285, 0x289, 0x28E, 0x287, 0x28C, 0x288, 0x286
 
-This does NOT require CANoe.
-For real Vector hardware it uses:
-    Python -> python-can -> Vector XL Driver -> VN5610A -> ECU
+The CAPL supplies stimulus/message generation. It does NOT specify the
+cluster ECU response IDs or response payloads. Therefore RESPONSE_RULES
+below is intentionally configurable and is NOT fabricated from the CAPL.
+
+CANoe is NOT required.
+
+Real hardware:
+    Python -> python-can -> Vector XL Driver -> VN5610A -> CAN -> ECU
 
 Install:
     python -m pip install python-can
 
-For Vector VN5610A:
-    1. Install the official Vector Driver Setup / XL Driver Library.
-    2. Configure the Vector application/channel mapping.
-    3. Set CAN_INTERFACE = "vector".
+Optional DBC:
+    python -m pip install cantools
 
-For offline testing:
-    Set CAN_INTERFACE = "virtual".
+This file supports:
+    1. CAPL-equivalent cyclic transmission.
+    2. CAN RX capture.
+    3. Request/response validation when RESPONSE_RULES are configured.
+    4. Functional response validation when signal rules are configured.
+    5. PASS / FAIL / TIMEOUT / INFO results.
+    6. CSV report.
+    7. Keyboard state controls matching the CAPL.
+    8. Safe default: TX is disabled until SPACE is pressed.
 """
+
+from __future__ import annotations
 
 import csv
 import logging
+import threading
 import time
 from dataclasses import dataclass
 from datetime import datetime
+from pathlib import Path
 from typing import Optional
 
 import can
@@ -42,30 +60,124 @@ import can
 # CONFIGURATION
 # ============================================================
 
-CAN_INTERFACE = "vector"          # "vector" or "virtual"
-
-# Vector settings
+CAN_INTERFACE = "vector"       # "vector" or "virtual"
 VECTOR_CHANNEL = 0
 VECTOR_APP_NAME = "W501_Python"
 BITRATE = 500000
 
-# Virtual CAN settings
-VIRTUAL_CHANNEL = "ECU_TEST"
+VIRTUAL_CHANNEL = "W501_ECU_VALIDATION"
 
-# General
 IS_EXTENDED_ID = False
-RESPONSE_TIMEOUT_MS = 500
-INTER_FRAME_DELAY_MS = 100
 
-# Start transmission automatically.
-# Set False if you want to start manually from main().
-AUTO_RUN = True
+START_TRANSMISSION = False
 
-# Save results
-REPORT_FILE = "ecu_validation_report.csv"
-
-# Logging
 LOG_LEVEL = logging.INFO
+LOG_CAN_TX = True
+LOG_CAN_RX = True
+
+DEFAULT_RESPONSE_TIMEOUT_MS = 500
+
+REPORT_FILE = "W501_ECU_validation_report.csv"
+
+
+# ============================================================
+# RESPONSE VALIDATION CONFIGURATION
+# ============================================================
+#
+# IMPORTANT:
+# The supplied CAPL does NOT define these ECU responses.
+#
+# Configure them from your DBC/CAN matrix.
+#
+# Example:
+#
+# RESPONSE_RULES = {
+#     0x2CC: ResponseRule(
+#         response_id=0x2CD,
+#         positive_data=bytes.fromhex("50 01"),
+#         negative_prefix=bytes.fromhex("7F"),
+#         timeout_ms=500,
+#     )
+# }
+#
+# This is an example only.
+#
+# If a transmitted message has no response rule, the message is
+# still transmitted normally, but no PASS/FAIL response verdict is
+# claimed for it.
+#
+# ============================================================
+
+
+@dataclass
+class ResponseRule:
+    response_id: int
+
+    positive_data: Optional[bytes] = None
+    positive_mask: Optional[bytes] = None
+
+    negative_data: Optional[bytes] = None
+    negative_mask: Optional[bytes] = None
+
+    timeout_ms: int = DEFAULT_RESPONSE_TIMEOUT_MS
+
+    # If True, any matching response ID is considered the response,
+    # and positive_data is optional.
+    accept_id_only: bool = False
+
+
+# USER CONFIGURATION:
+# Add actual ECU response definitions here.
+RESPONSE_RULES: dict[int, ResponseRule] = {
+    #
+    # EXAMPLE ONLY:
+    #
+    # 0x2CC: ResponseRule(
+    #     response_id=0x2CD,
+    #     positive_data=bytes.fromhex("50 01"),
+    #     negative_data=bytes.fromhex("7F 10 13"),
+    #     timeout_ms=500,
+    # ),
+}
+
+
+# ============================================================
+# FUNCTIONAL VALIDATION CONFIGURATION
+# ============================================================
+#
+# This is for cyclic cluster feedback rather than explicit
+# request/response protocols.
+#
+# Example concept:
+#
+# TX 0x2CC contains vehicle speed = 50 km/h
+# Cluster returns RX 0x500 containing displayed speed = 50 km/h
+#
+# The exact RX ID/byte/signal must come from the DBC.
+#
+# ============================================================
+
+
+@dataclass
+class FunctionalRule:
+    response_id: int
+    byte_index: int
+    expected_value: int
+    mask: int = 0xFF
+    timeout_ms: int = DEFAULT_RESPONSE_TIMEOUT_MS
+
+
+FUNCTIONAL_RULES: dict[int, FunctionalRule] = {
+    #
+    # EXAMPLE ONLY:
+    #
+    # 0x2CC: FunctionalRule(
+    #     response_id=0x500,
+    #     byte_index=0,
+    #     expected_value=50,
+    #     timeout_ms=500,
+    # ),
+}
 
 
 # ============================================================
@@ -78,103 +190,65 @@ logging.basicConfig(
     datefmt="%H:%M:%S",
 )
 
-log = logging.getLogger("ECU_VALIDATOR")
+log = logging.getLogger("W501")
 
 
 # ============================================================
-# TEST DEFINITION
+# W501 STATE
 # ============================================================
-
-@dataclass
-class CANTestCase:
-    name: str
-
-    # Request
-    tx_id: int
-    tx_data: bytes
-
-    # Expected response
-    expected_rx_id: int
-
-    # Positive response
-    positive_data: Optional[bytes] = None
-    positive_mask: Optional[bytes] = None
-
-    # Negative response
-    negative_data: Optional[bytes] = None
-    negative_mask: Optional[bytes] = None
-
-    timeout_ms: int = RESPONSE_TIMEOUT_MS
 
 
 @dataclass
-class TestResult:
-    name: str
-    tx_id: int
-    expected_rx_id: int
-    actual_rx_id: Optional[int]
-    tx_data: str
-    rx_data: str
-    result: str
-    reason: str
-    response_time_ms: Optional[float]
+class ClusterState:
+    curr_speed_kmh: float = 0.0
+    total_dist_m: float = 0.0
 
+    is_moto: int = 0
+    is_sim_running: bool = True
 
-# ============================================================
-# BYTE MATCHING
-# ============================================================
+    curr_rpm: int = 0
+    curr_gear: int = 0
 
-def masked_match(
-    actual: bytes,
-    expected: bytes,
-    mask: Optional[bytes] = None,
-) -> bool:
-    """
-    Compare bytes.
+    st_E: int = 0
+    st_O: int = 0
+    st_B: int = 0
+    st_S: int = 0
+    st_Cruise: int = 0
+    st_ESS: int = 0
+    st_Clutch: int = 0
+    st_AT_Malfunc: int = 0
+    st_Door: int = 0
+    st_ABS: int = 0
+    st_Immo: int = 0
 
-    Without mask:
-        complete byte-for-byte comparison.
+    st_L: int = 0
+    st_R: int = 0
+    st_H: int = 0
+    st_f: int = 0
+    st_F: int = 0
+    st_T: int = 0
 
-    With mask:
-        only bits selected by mask are compared.
+    v_temp: float = 90.0
+    v_amb_temp: float = 25.0
+    v_sas_angle: int = 0
+    v_drive_mode: int = 0
+    v_rpas_dist: int = 255
 
-    Example:
+    lock: threading.Lock = threading.Lock()
 
-        expected = 0x50
-        actual   = 0x53
-        mask     = 0xF0
-
-        0x50 & 0xF0 == 0x53 & 0xF0
-        therefore MATCH.
-    """
-
-    if len(actual) < len(expected):
-        return False
-
-    if mask is None:
-        return actual[:len(expected)] == expected
-
-    if len(mask) != len(expected):
-        raise ValueError(
-            "Mask length must match expected-data length"
-        )
-
-    for actual_byte, expected_byte, mask_byte in zip(
-        actual,
-        expected,
-        mask,
-    ):
-        if (actual_byte & mask_byte) != (
-            expected_byte & mask_byte
-        ):
-            return False
-
-    return True
+    def snapshot(self):
+        with self.lock:
+            return {
+                key: value
+                for key, value in self.__dict__.items()
+                if key != "lock"
+            }
 
 
 # ============================================================
 # CAN INTERFACE
 # ============================================================
+
 
 class CANInterface:
 
@@ -183,15 +257,20 @@ class CANInterface:
 
     def connect(self):
 
-        log.info("Opening CAN interface: %s", CAN_INTERFACE)
+        log.info(
+            "Opening CAN interface=%s channel=%s bitrate=%s",
+            CAN_INTERFACE,
+            VECTOR_CHANNEL,
+            BITRATE,
+        )
 
         if CAN_INTERFACE.lower() == "vector":
 
             self.bus = can.Bus(
                 interface="vector",
                 channel=VECTOR_CHANNEL,
-                app_name=VECTOR_APP_NAME,
                 bitrate=BITRATE,
+                app_name=VECTOR_APP_NAME,
             )
 
         elif CAN_INTERFACE.lower() == "virtual":
@@ -206,13 +285,12 @@ class CANInterface:
                 f"Unsupported CAN interface: {CAN_INTERFACE}"
             )
 
-        log.info("CAN interface connected.")
+        log.info("CAN interface opened.")
 
-    def send(
-        self,
-        arbitration_id: int,
-        data: bytes,
-    ):
+    def send(self, arbitration_id: int, data: bytes):
+
+        if self.bus is None:
+            raise RuntimeError("CAN bus is not connected.")
 
         message = can.Message(
             arbitration_id=arbitration_id,
@@ -222,20 +300,24 @@ class CANInterface:
 
         self.bus.send(message)
 
-        log.info(
-            "TX 0x%03X [%d] %s",
-            arbitration_id,
-            len(data),
-            data.hex(" "),
-        )
+        if LOG_CAN_TX:
+            log.info(
+                "TX 0x%03X [%d] %s",
+                arbitration_id,
+                len(data),
+                data.hex(" "),
+            )
 
-    def receive(self, timeout: float):
+    def receive(self, timeout: float = 0.1):
+
+        if self.bus is None:
+            return None
 
         return self.bus.recv(timeout=timeout)
 
     def shutdown(self):
 
-        if self.bus is not None:
+        if self.bus:
 
             try:
                 self.bus.shutdown()
@@ -248,482 +330,566 @@ class CANInterface:
 
 
 # ============================================================
-# ECU RESPONSE VALIDATOR
+# BYTE HELPERS
 # ============================================================
 
-class ECUValidator:
 
-    def __init__(self, can_interface: CANInterface):
+def u16_be(value: int) -> tuple[int, int]:
+    value &= 0xFFFF
+    return (value >> 8) & 0xFF, value & 0xFF
 
-        self.can_interface = can_interface
 
-    def run_test(
-        self,
-        test: CANTestCase,
-    ) -> TestResult:
+def u16_le(value: int) -> tuple[int, int]:
+    value &= 0xFFFF
+    return value & 0xFF, (value >> 8) & 0xFF
 
-        log.info("")
-        log.info("=" * 70)
-        log.info("TEST: %s", test.name)
-        log.info("=" * 70)
 
-        start_time = time.perf_counter()
+def masked_match(
+    actual: bytes,
+    expected: bytes,
+    mask: Optional[bytes],
+) -> bool:
 
-        # ----------------------------------------------------
-        # TRANSMIT REQUEST
-        # ----------------------------------------------------
+    if len(actual) < len(expected):
+        return False
 
-        self.can_interface.send(
-            test.tx_id,
-            test.tx_data,
+    if mask is None:
+        return actual[:len(expected)] == expected
+
+    if len(mask) != len(expected):
+        raise ValueError(
+            "Expected-data and mask lengths must match."
         )
 
-        # ----------------------------------------------------
-        # WAIT FOR ECU RESPONSE
-        # ----------------------------------------------------
+    for a, e, m in zip(actual, expected, mask):
 
-        timeout_seconds = test.timeout_ms / 1000.0
+        if (a & m) != (e & m):
+            return False
 
-        deadline = time.perf_counter() + timeout_seconds
+    return True
 
-        actual_rx_id = None
-        rx_data = b""
-        response_time_ms = None
 
-        while time.perf_counter() < deadline:
+# ============================================================
+# W501 MESSAGE BUILDERS
+# ============================================================
 
-            remaining = deadline - time.perf_counter()
 
-            message = self.can_interface.receive(
-                timeout=max(0.001, remaining)
+class W501MessageBuilder:
+
+    def __init__(self, state: ClusterState):
+
+        self.state = state
+
+    def msg_10ms(self):
+
+        with self.state.lock:
+
+            speed = self.state.curr_speed_kmh
+            rpm = self.state.curr_rpm
+            gear = self.state.curr_gear
+
+            self.state.total_dist_m += (
+                speed * 0.002777
             )
 
-            if message is None:
-                continue
+            dist_raw = int(self.state.total_dist_m) & 0xFFFF
 
-            # Ignore our own request or unrelated CAN traffic.
-            if message.arbitration_id != test.expected_rx_id:
-                log.debug(
-                    "Ignoring CAN ID 0x%03X",
-                    message.arbitration_id,
-                )
-                continue
+            raw_speed = int(speed * 100.0) & 0xFFFF
 
-            actual_rx_id = message.arbitration_id
-            rx_data = bytes(message.data)
+            is_moto = self.state.is_moto
 
-            response_time_ms = (
-                time.perf_counter() - start_time
-            ) * 1000.0
+            st_E = self.state.st_E
+            st_Cruise = self.state.st_Cruise
+            st_O = self.state.st_O
+            st_ESS = self.state.st_ESS
+            st_Clutch = self.state.st_Clutch
+            st_ABS = self.state.st_ABS
+            temp = self.state.v_temp
+            sas = self.state.v_sas_angle
 
-            log.info(
-                "RX 0x%03X [%d] %s",
-                actual_rx_id,
-                len(rx_data),
-                rx_data.hex(" "),
+        # ----------------------------------------------------
+        # 0x142 EMS36
+        # ----------------------------------------------------
+
+        ems36 = bytearray(8)
+
+        if is_moto:
+            ems36[0], ems36[1] = u16_be(rpm)
+        else:
+            ems36[0], ems36[1] = u16_le(rpm)
+
+        # ----------------------------------------------------
+        # 0x2CC ESC2
+        # ----------------------------------------------------
+
+        esc2 = bytearray(8)
+
+        if is_moto:
+
+            esc2[0], esc2[1] = u16_be(raw_speed)
+            esc2[4], esc2[5] = u16_be(raw_speed)
+            esc2[2], esc2[3] = u16_be(dist_raw)
+
+        else:
+
+            esc2[0], esc2[1] = u16_le(raw_speed)
+            esc2[4], esc2[5] = u16_le(raw_speed)
+            esc2[2], esc2[3] = u16_le(dist_raw)
+
+        # ----------------------------------------------------
+        # 0x282 ESC12
+        # ----------------------------------------------------
+
+        esc12 = bytearray(8)
+
+        if is_moto:
+
+            esc12[2], esc12[3] = u16_be(raw_speed)
+            esc12[0], esc12[1] = u16_be(dist_raw)
+
+        else:
+
+            esc12[2], esc12[3] = u16_le(raw_speed)
+            esc12[0], esc12[1] = u16_le(dist_raw)
+
+        esc12[4] = (st_ABS * 0xFF) & 0xFF
+
+        # ----------------------------------------------------
+        # 0x124 EMS1
+        # ----------------------------------------------------
+
+        ems1 = bytearray(8)
+
+        if is_moto:
+            ems1[1], ems1[2] = u16_be(rpm)
+        else:
+            ems1[1], ems1[2] = u16_le(rpm)
+
+        ems1[4] = gear & 0xFF
+        ems1[7] = int(temp + 40.0) & 0xFF
+        ems1[0] = (
+            (st_E * 0xC0)
+            | (st_Cruise * 0x08)
+        ) & 0xFF
+        ems1[5] = (st_O * 0x02) & 0xFF
+
+        # ----------------------------------------------------
+        # 0x108 EMS3
+        # ----------------------------------------------------
+
+        ems3 = bytearray(8)
+
+        ems3[0] = (st_ESS * 0xFF) & 0xFF
+        ems3[1] = (st_Clutch * 0xFF) & 0xFF
+
+        # ----------------------------------------------------
+        # 0x114 SAS1
+        # ----------------------------------------------------
+
+        sas1 = bytearray(8)
+
+        if is_moto:
+            sas1[0], sas1[1] = u16_be(sas & 0xFFFF)
+        else:
+            sas1[0], sas1[1] = u16_le(sas & 0xFFFF)
+
+        # ----------------------------------------------------
+        # Other 10-ms messages are transmitted as zero/default
+        # payloads because the supplied CAPL does not assign
+        # their bytes in timer_10ms.
+        # ----------------------------------------------------
+
+        return [
+            (0x142, bytes(ems36)),
+            (0x2CC, bytes(esc2)),
+            (0x282, bytes(esc12)),
+            (0x124, bytes(ems1)),
+            (0x108, bytes(ems3)),
+            (0x10D, bytes(8)),
+            (0x126, bytes(8)),
+            (0x136, bytes(8)),
+            (0x114, bytes(sas1)),
+        ]
+
+    def msg_20ms(self):
+
+        with self.state.lock:
+
+            st_B = self.state.st_B
+            st_S = self.state.st_S
+            st_AT = self.state.st_AT_Malfunc
+            drive = self.state.v_drive_mode
+            rpas = self.state.v_rpas_dist
+
+        srs1 = bytearray(8)
+        srs1[0] = st_B & 0x01
+        srs1[3] = st_S & 0x01
+
+        tcu6 = bytearray(8)
+        tcu6[0] = (st_AT * 0xFF) & 0xFF
+
+        ems4 = bytearray(8)
+        ems4[6] = ((drive & 0x07) << 5) & 0xFF
+
+        rpas1 = bytearray(8)
+        rpas1[7] = rpas & 0xFF
+
+        return [
+            (0x130, bytes(ems4)),
+            (0x278, bytes(tcu6)),
+            (0x2C0, bytes(srs1)),
+            (0x227, bytes(rpas1)),
+            (0x170, bytes(8)),
+        ]
+
+    def msg_50ms(self):
+
+        return [
+            (0x326, bytes(8)),
+        ]
+
+    def msg_100ms(self):
+
+        with self.state.lock:
+
+            st_Door = self.state.st_Door
+            st_Immo = self.state.st_Immo
+            st_L = self.state.st_L
+            st_R = self.state.st_R
+            st_H = self.state.st_H
+            st_f = self.state.st_f
+            st_F = self.state.st_F
+            st_T = self.state.st_T
+
+        pke = bytearray(8)
+        pke[0] = (st_Immo * 0xFF) & 0xFF
+
+        mbfm1 = bytearray(8)
+        mbfm1[4] = (st_Door * 0x3F) & 0xFF
+        mbfm1[0] = (
+            (st_L * 0x01)
+            | (st_R * 0x02)
+            | (st_H * 0x04)
+        ) & 0xFF
+        mbfm1[1] = (
+            (st_f * 0x01)
+            | (st_F * 0x02)
+            | (st_T * 0x04)
+        ) & 0xFF
+
+        return [
+            (0x214, bytes(8)),
+            (0x233, bytes(8)),
+            (0x342, bytes(pke)),
+            (0x348, bytes(mbfm1)),
+            (0x220, bytes(8)),
+            (0x229, bytes(8)),
+        ]
+
+    def msg_200ms(self):
+
+        return [
+            (0x310, bytes(8)),
+            (0x57E, bytes(8)),
+            (0x57D, bytes(8)),
+        ]
+
+    def msg_500ms(self):
+
+        with self.state.lock:
+            ambient = self.state.v_amb_temp
+
+        ems6 = bytearray(8)
+        ems6[1] = int(ambient * 2.0) & 0xFF
+
+        return [
+            (0x308, bytes(ems6)),
+            (0x3CA, bytes(8)),
+            (0x21F, bytes(8)),
+            (0x3C0, bytes(8)),
+            (0x3CB, bytes(8)),
+        ]
+
+    def msg_1000ms(self):
+
+        return [
+            (0x666, bytes(8)),
+        ]
+
+    def msg_nsm(self):
+
+        return [
+            (0x285, bytes(8)),
+            (0x289, bytes(8)),
+            (0x28E, bytes(8)),
+            (0x287, bytes(8)),
+            (0x28C, bytes(8)),
+            (0x288, bytes(8)),
+            (0x286, bytes(8)),
+        ]
+
+
+# ============================================================
+# RESPONSE VALIDATION ENGINE
+# ============================================================
+
+
+class ResponseValidator:
+
+    def __init__(self):
+
+        self.pending: dict[int, list[tuple[float, ResponseRule]]] = {}
+        self.lock = threading.Lock()
+
+        self.results = []
+
+    def register_tx(self, tx_id: int):
+
+        rule = RESPONSE_RULES.get(tx_id)
+
+        if rule is None:
+            return
+
+        deadline = (
+            time.monotonic()
+            + rule.timeout_ms / 1000.0
+        )
+
+        with self.lock:
+
+            self.pending.setdefault(
+                tx_id,
+                [],
+            ).append(
+                (deadline, rule)
             )
 
-            break
+    def process_rx(self, message: can.Message):
 
-        # ----------------------------------------------------
-        # NO RESPONSE
-        # ----------------------------------------------------
+        if not RESPONSE_RULES:
+            return
 
-        if actual_rx_id is None:
+        now = time.monotonic()
 
-            result = TestResult(
-                name=test.name,
-                tx_id=test.tx_id,
-                expected_rx_id=test.expected_rx_id,
-                actual_rx_id=None,
-                tx_data=test.tx_data.hex(" "),
-                rx_data="",
-                result="TIMEOUT",
-                reason=(
-                    f"No response from 0x"
-                    f"{test.expected_rx_id:03X} within "
-                    f"{test.timeout_ms} ms"
-                ),
-                response_time_ms=None,
-            )
+        # Find request rules whose expected response ID matches.
+        matching = []
 
-            self._print_result(result)
+        with self.lock:
 
-            return result
+            for tx_id, entries in self.pending.items():
 
-        # ----------------------------------------------------
-        # NEGATIVE RESPONSE
-        # ----------------------------------------------------
+                for deadline, rule in entries:
 
+                    if message.arbitration_id == rule.response_id:
+
+                        matching.append(
+                            (tx_id, deadline, rule)
+                        )
+
+        if not matching:
+            return
+
+        tx_id, deadline, rule = matching[0]
+
+        actual = bytes(message.data)
+
+        # Negative response has priority.
         if (
-            test.negative_data is not None
+            rule.negative_data is not None
             and masked_match(
-                rx_data,
-                test.negative_data,
-                test.negative_mask,
+                actual,
+                rule.negative_data,
+                rule.negative_mask,
             )
         ):
 
-            result = TestResult(
-                name=test.name,
-                tx_id=test.tx_id,
-                expected_rx_id=test.expected_rx_id,
-                actual_rx_id=actual_rx_id,
-                tx_data=test.tx_data.hex(" "),
-                rx_data=rx_data.hex(" "),
+            self.record(
+                tx_id=tx_id,
+                response_id=message.arbitration_id,
                 result="FAIL",
-                reason="ECU returned NEGATIVE response",
-                response_time_ms=response_time_ms,
+                reason="Negative ECU response",
+                response_data=actual,
             )
 
-            self._print_result(result)
+            self._remove_pending(tx_id, rule)
 
-            return result
+            return
 
-        # ----------------------------------------------------
-        # POSITIVE RESPONSE
-        # ----------------------------------------------------
+        # ID-only positive validation.
+        if rule.accept_id_only:
 
-        if test.positive_data is None:
-
-            result = TestResult(
-                name=test.name,
-                tx_id=test.tx_id,
-                expected_rx_id=test.expected_rx_id,
-                actual_rx_id=actual_rx_id,
-                tx_data=test.tx_data.hex(" "),
-                rx_data=rx_data.hex(" "),
+            self.record(
+                tx_id=tx_id,
+                response_id=message.arbitration_id,
                 result="PASS",
-                reason="Expected response CAN ID received",
-                response_time_ms=response_time_ms,
+                reason="Expected response ID received",
+                response_data=actual,
             )
 
-            self._print_result(result)
+            self._remove_pending(tx_id, rule)
 
-            return result
+            return
 
-        positive = masked_match(
-            rx_data,
-            test.positive_data,
-            test.positive_mask,
-        )
+        # Positive payload validation.
+        if rule.positive_data is None:
 
-        if positive:
+            self.record(
+                tx_id=tx_id,
+                response_id=message.arbitration_id,
+                result="PASS",
+                reason="Expected response ID received",
+                response_data=actual,
+            )
 
-            result = TestResult(
-                name=test.name,
-                tx_id=test.tx_id,
-                expected_rx_id=test.expected_rx_id,
-                actual_rx_id=actual_rx_id,
-                tx_data=test.tx_data.hex(" "),
-                rx_data=rx_data.hex(" "),
+            self._remove_pending(tx_id, rule)
+
+            return
+
+        if masked_match(
+            actual,
+            rule.positive_data,
+            rule.positive_mask,
+        ):
+
+            self.record(
+                tx_id=tx_id,
+                response_id=message.arbitration_id,
                 result="PASS",
                 reason="Positive response matched",
-                response_time_ms=response_time_ms,
+                response_data=actual,
             )
 
         else:
 
-            result = TestResult(
-                name=test.name,
-                tx_id=test.tx_id,
-                expected_rx_id=test.expected_rx_id,
-                actual_rx_id=actual_rx_id,
-                tx_data=test.tx_data.hex(" "),
-                rx_data=rx_data.hex(" "),
+            self.record(
+                tx_id=tx_id,
+                response_id=message.arbitration_id,
                 result="FAIL",
-                reason="Response data did not match expected positive response",
-                response_time_ms=response_time_ms,
+                reason="Incorrect response payload",
+                response_data=actual,
             )
 
-        self._print_result(result)
+        self._remove_pending(tx_id, rule)
 
-        return result
+    def check_timeouts(self):
 
-    @staticmethod
-    def _print_result(result: TestResult):
+        now = time.monotonic()
+        expired = []
 
-        log.info("")
-        log.info("RESULT")
-        log.info("TX ID       : 0x%03X", result.tx_id)
-        log.info(
-            "Expected RX : 0x%03X",
-            result.expected_rx_id,
-        )
+        with self.lock:
 
-        if result.actual_rx_id is not None:
-            log.info(
-                "Actual RX   : 0x%03X",
-                result.actual_rx_id,
+            for tx_id, entries in self.pending.items():
+
+                for deadline, rule in entries:
+
+                    if now >= deadline:
+
+                        expired.append(
+                            (tx_id, rule)
+                        )
+
+            for tx_id, rule in expired:
+
+                self.pending[tx_id] = [
+                    item
+                    for item in self.pending[tx_id]
+                    if item[1] is not rule
+                ]
+
+        for tx_id, rule in expired:
+
+            self.record(
+                tx_id=tx_id,
+                response_id=rule.response_id,
+                result="TIMEOUT",
+                reason=(
+                    f"No response within "
+                    f"{rule.timeout_ms} ms"
+                ),
+                response_data=b"",
             )
 
-        log.info(
-            "TX DATA     : %s",
-            result.tx_data or "-",
-        )
+    def _remove_pending(
+        self,
+        tx_id: int,
+        rule: ResponseRule,
+    ):
+
+        with self.lock:
+
+            if tx_id not in self.pending:
+                return
+
+            self.pending[tx_id] = [
+                item
+                for item in self.pending[tx_id]
+                if item[1] is not rule
+            ]
+
+    def record(
+        self,
+        tx_id: int,
+        response_id: int,
+        result: str,
+        reason: str,
+        response_data: bytes,
+    ):
+
+        entry = {
+            "timestamp": datetime.now().isoformat(
+                timespec="milliseconds"
+            ),
+            "tx_id": f"0x{tx_id:X}",
+            "rx_id": f"0x{response_id:X}",
+            "rx_data": response_data.hex(" "),
+            "result": result,
+            "reason": reason,
+        }
+
+        self.results.append(entry)
 
         log.info(
-            "RX DATA     : %s",
-            result.rx_data or "-",
+            "VALIDATION TX=0x%03X RX=0x%03X => %s | %s",
+            tx_id,
+            response_id,
+            result,
+            reason,
         )
-
-        if result.response_time_ms is not None:
-            log.info(
-                "Response    : %.2f ms",
-                result.response_time_ms,
-            )
-
-        log.info("STATUS      : %s", result.result)
-        log.info("REASON      : %s", result.reason)
 
 
 # ============================================================
-# TEST SUITE
+# RX THREAD
 # ============================================================
 
-class ECUTestSuite:
 
-    def __init__(self, validator: ECUValidator):
+class RXWorker:
 
+    def __init__(
+        self,
+        bus: CANInterface,
+        validator: ResponseValidator,
+        stop_event: threading.Event,
+    ):
+
+        self.bus = bus
         self.validator = validator
-        self.results = []
+        self.stop_event = stop_event
 
-    def run(self, tests):
+    def run(self):
 
-        log.info("")
-        log.info("=" * 70)
-        log.info(" ECU REQUEST / RESPONSE AUTOMATION")
-        log.info("=" * 70)
+        log.info("RX worker started.")
 
-        for test in tests:
+        while not self.stop_event.is_set():
 
-            result = self.validator.run_test(test)
-
-            self.results.append(result)
-
-            time.sleep(
-                INTER_FRAME_DELAY_MS / 1000.0
+            message = self.bus.receive(
+                timeout=0.1
             )
 
-        self.print_summary()
-        self.write_report()
+            if message is None:
+                self.validator.check_timeouts()
+                continue
 
-    def print_summary(self):
-
-        total = len(self.results)
-
-        passed = sum(
-            1 for r in self.results
-            if r.result == "PASS"
-        )
-
-        failed = sum(
-            1 for r in self.results
-            if r.result == "FAIL"
-        )
-
-        timeout = sum(
-            1 for r in self.results
-            if r.result == "TIMEOUT"
-        )
-
-        log.info("")
-        log.info("=" * 70)
-        log.info(" FINAL TEST SUMMARY")
-        log.info("=" * 70)
-
-        log.info("TOTAL   : %d", total)
-        log.info("PASS    : %d", passed)
-        log.info("FAIL    : %d", failed)
-        log.info("TIMEOUT : %d", timeout)
-
-        log.info("=" * 70)
-
-    def write_report(self):
-
-        timestamp = datetime.now().strftime(
-            "%Y%m%d_%H%M%S"
-        )
-
-        filename = (
-            REPORT_FILE.rsplit(".", 1)[0]
-            + "_"
-            + timestamp
-            + ".csv"
-        )
-
-        with open(
-            filename,
-            "w",
-            newline="",
-            encoding="utf-8",
-        ) as file:
-
-            writer = csv.writer(file)
-
-            writer.writerow([
-                "Test",
-                "TX ID",
-                "Expected RX ID",
-                "Actual RX ID",
-                "TX Data",
-                "RX Data",
-                "Result",
-                "Reason",
-                "Response Time (ms)",
-            ])
-
-            for result in self.results:
-
-                writer.writerow([
-                    result.name,
-                    f"0x{result.tx_id:X}",
-                    f"0x{result.expected_rx_id:X}",
-                    (
-                        f"0x{result.actual_rx_id:X}"
-                        if result.actual_rx_id is not None
-                        else ""
-                    ),
-                    result.tx_data,
-                    result.rx_data,
-                    result.result,
-                    result.reason,
-                    (
-                        f"{result.response_time_ms:.2f}"
-                        if result.response_time_ms is not None
-                        else ""
-                    ),
-                ])
-
-        log.info("Report saved: %s", filename)
-
-
-# ============================================================
-# EXAMPLE TEST CASES
-# ============================================================
-
-def create_test_cases():
-
-    """
-    IMPORTANT:
-
-    These are EXAMPLE request/response definitions demonstrating
-    the validation mechanism requested by the user.
-
-    Replace the data patterns with the actual ECU protocol.
-
-    Example:
-        TX 0x100
-        RX 0x101
-
-    Positive:
-        50 AA
-
-    Negative:
-        7F 10 13
-
-    If the ECU sends:
-        0x101 50 AA ...
-        => PASS
-
-    If the ECU sends:
-        0x101 7F 10 13 ...
-        => FAIL / NEGATIVE RESPONSE
-
-    If no 0x101 arrives:
-        => TIMEOUT
-    """
-
-    return [
-
-        CANTestCase(
-            name="Example Request 0x100",
-            tx_id=0x100,
-
-            tx_data=bytes([
-                0x10,
-                0x01,
-                0x00,
-                0x00,
-                0x00,
-                0x00,
-                0x00,
-                0x00,
-            ]),
-
-            expected_rx_id=0x101,
-
-            # Example positive response
-            positive_data=bytes([
-                0x50,
-                0x01,
-            ]),
-
-            # Example negative response
-            negative_data=bytes([
-                0x7F,
-                0x10,
-                0x13,
-            ]),
-
-            timeout_ms=500,
-        ),
-
-        CANTestCase(
-            name="Example Request 0x200",
-            tx_id=0x200,
-
-            tx_data=bytes([
-                0x22,
-                0x01,
-                0x00,
-                0x00,
-                0x00,
-                0x00,
-                0x00,
-                0x00,
-            ]),
-
-            expected_rx_id=0x201,
-
-            positive_data=bytes([
-                0x62,
-                0x01,
-            ]),
-
-            negative_data=bytes([
-                0x7F,
-                0x22,
-                0x31,
-            ]),
-
-            timeout_ms=500,
-        ),
-    ]
-
-
-# ============================================================
-# OPTIONAL REAL-TIME RX MONITOR
-# ============================================================
-
-def monitor_can(bus: CANInterface):
-
-    """
-    Useful during development.
-
-    Prints every CAN frame received from the network.
-    Press CTRL+C to stop.
-    """
-
-    log.info("Starting CAN RX monitor.")
-
-    try:
-
-        while True:
-
-            message = bus.receive(timeout=1.0)
-
-            if message:
+            if LOG_CAN_RX:
 
                 log.info(
                     "RX 0x%03X [%d] %s",
@@ -732,53 +898,592 @@ def monitor_can(bus: CANInterface):
                     bytes(message.data).hex(" "),
                 )
 
-    except KeyboardInterrupt:
+            self.validator.process_rx(message)
 
-        log.info("RX monitor stopped.")
+            self.validator.check_timeouts()
+
+        log.info("RX worker stopped.")
+
+
+# ============================================================
+# CYCLIC TX ENGINE
+# ============================================================
+
+
+class W501Transmitter:
+
+    def __init__(
+        self,
+        bus: CANInterface,
+        state: ClusterState,
+        validator: ResponseValidator,
+    ):
+
+        self.bus = bus
+        self.state = state
+        self.validator = validator
+
+        self.builder = W501MessageBuilder(
+            state
+        )
+
+        self.stop_event = threading.Event()
+        self.tx_enabled = START_TRANSMISSION
+
+        self.threads = []
+
+    def start(self):
+
+        schedules = [
+            (0.010, self.builder.msg_10ms),
+            (0.020, self.builder.msg_20ms),
+            (0.050, self.builder.msg_50ms),
+            (0.100, self.builder.msg_100ms),
+            (0.200, self.builder.msg_200ms),
+            (0.500, self.builder.msg_500ms),
+            (1.000, self.builder.msg_1000ms),
+            (0.250, self.builder.msg_nsm),
+        ]
+
+        for period, callback in schedules:
+
+            thread = threading.Thread(
+                target=self._timer_loop,
+                args=(period, callback),
+                daemon=True,
+                name=f"W501-{int(period * 1000)}ms",
+            )
+
+            thread.start()
+
+            self.threads.append(thread)
+
+        log.info(
+            "W501 cyclic TX engine started. TX=%s",
+            "ENABLED" if self.tx_enabled else "PAUSED",
+        )
+
+    def _timer_loop(
+        self,
+        period: float,
+        callback,
+    ):
+
+        next_time = time.monotonic()
+
+        while not self.stop_event.is_set():
+
+            next_time += period
+
+            if self.tx_enabled:
+
+                try:
+
+                    messages = callback()
+
+                    for arbitration_id, data in messages:
+
+                        # Register validation BEFORE TX.
+                        self.validator.register_tx(
+                            arbitration_id
+                        )
+
+                        self.bus.send(
+                            arbitration_id,
+                            data,
+                        )
+
+                except Exception:
+
+                    log.exception(
+                        "Error in %s timer",
+                        callback.__name__,
+                    )
+
+            wait = max(
+                0,
+                next_time - time.monotonic(),
+            )
+
+            self.stop_event.wait(wait)
+
+    def enable(self):
+
+        self.tx_enabled = True
+        log.info("W501 TX ENABLED.")
+
+    def pause(self):
+
+        self.tx_enabled = False
+        log.info("W501 TX PAUSED.")
+
+    def stop(self):
+
+        self.stop_event.set()
+
+        for thread in self.threads:
+
+            thread.join(
+                timeout=1.0
+            )
+
+        log.info("W501 TX engine stopped.")
+
+
+# ============================================================
+# KEYBOARD CONTROLLER
+# ============================================================
+
+
+class KeyboardController:
+
+    def __init__(
+        self,
+        state: ClusterState,
+        transmitter: W501Transmitter,
+    ):
+
+        self.state = state
+        self.transmitter = transmitter
+
+    def print_controls(self):
+
+        print()
+        print("=" * 70)
+        print(" W501 CONTROLS")
+        print("=" * 70)
+        print("SPACE : Start/Pause CAN transmission")
+        print("Y     : Toggle Motorola / Intel")
+        print("v/V   : Speed +5 / -5 km/h")
+        print("r/R   : RPM +500 / -500")
+        print("0-7   : Gear")
+        print("L     : Left turn")
+        print("M     : Right turn")
+        print("H     : High beam")
+        print("f     : Front fog")
+        print("F     : Rear fog")
+        print("S     : Seatbelt")
+        print("B     : Airbag")
+        print("E     : Engine/MIL")
+        print("O     : Oil")
+        print("T     : TPMS")
+        print("c     : Cruise")
+        print("C     : ESS")
+        print("l     : Clutch")
+        print("m     : AT malfunction")
+        print("d     : Door")
+        print("b     : ABS/ESC")
+        print("i     : Immobilizer")
+        print("t     : Engine temperature +5 C")
+        print("w     : Ambient temperature +2 C")
+        print("z     : Steering angle +10")
+        print("p     : RPAS distance -10")
+        print("k     : Drive mode 0..3")
+        print("q     : Quit")
+        print("=" * 70)
+        print()
+
+    def run(self):
+
+        self.print_controls()
+
+        try:
+            import keyboard
+        except ImportError:
+
+            log.warning(
+                "keyboard package is not installed."
+            )
+
+            log.info(
+                "Install with: "
+                "python -m pip install keyboard"
+            )
+
+            while True:
+
+                command = input(
+                    "Enter q to quit, "
+                    "or press ENTER to continue: "
+                )
+
+                if command.lower() == "q":
+                    break
+
+            return
+
+        while True:
+
+            event = keyboard.read_event()
+
+            if event.event_type != keyboard.KEY_DOWN:
+                continue
+
+            key = event.name
+
+            if key == "q":
+                break
+
+            self.handle_key(key)
+
+    def toggle(self, attribute, name):
+
+        with self.state.lock:
+
+            current = getattr(
+                self.state,
+                attribute,
+            )
+
+            setattr(
+                self.state,
+                attribute,
+                0 if current else 1,
+            )
+
+            log.info(
+                "%s: %d",
+                name,
+                getattr(self.state, attribute),
+            )
+
+    def handle_key(self, key):
+
+        if key == "space":
+
+            if self.transmitter.tx_enabled:
+                self.transmitter.pause()
+            else:
+                self.transmitter.enable()
+
+            return
+
+        if key == "y":
+
+            with self.state.lock:
+                self.state.is_moto = (
+                    0
+                    if self.state.is_moto
+                    else 1
+                )
+
+            log.info(
+                "BYTE ORDER: %s",
+                "Motorola/Big Endian"
+                if self.state.is_moto
+                else "Intel/Little Endian",
+            )
+
+            return
+
+        if key == "v":
+
+            with self.state.lock:
+                self.state.curr_speed_kmh = min(
+                    240,
+                    self.state.curr_speed_kmh + 5,
+                )
+
+            log.info(
+                "Speed: %.1f km/h",
+                self.state.curr_speed_kmh,
+            )
+
+            return
+
+        if key == "r":
+
+            with self.state.lock:
+                self.state.curr_rpm = min(
+                    8000,
+                    self.state.curr_rpm + 500,
+                )
+
+            log.info(
+                "RPM: %d",
+                self.state.curr_rpm,
+            )
+
+            return
+
+        if key in [str(i) for i in range(8)]:
+
+            with self.state.lock:
+                self.state.curr_gear = int(key)
+
+            log.info(
+                "Gear: %s",
+                "Neutral"
+                if key == "0"
+                else (
+                    "Reverse"
+                    if key == "7"
+                    else key
+                ),
+            )
+
+            return
+
+        mapping = {
+            "l": ("st_Clutch", "Clutch"),
+            "m": ("st_AT_Malfunc", "AT Malfunction"),
+            "d": ("st_Door", "Door"),
+            "b": ("st_ABS", "ABS/ESC"),
+            "i": ("st_Immo", "Immobilizer"),
+            "c": ("st_Cruise", "Cruise"),
+            "C": ("st_ESS", "ESS"),
+            "L": ("st_L", "Left Turn"),
+            "M": ("st_R", "Right Turn"),
+            "H": ("st_H", "High Beam"),
+            "f": ("st_f", "Front Fog"),
+            "F": ("st_F", "Rear Fog"),
+            "S": ("st_S", "Seatbelt"),
+            "B": ("st_B", "Airbag"),
+            "E": ("st_E", "Engine/MIL"),
+            "O": ("st_O", "Oil"),
+            "T": ("st_T", "TPMS"),
+        }
+
+        if key in mapping:
+
+            attr, name = mapping[key]
+
+            self.toggle(
+                attr,
+                name,
+            )
+
+            return
+
+        if key == "t":
+
+            with self.state.lock:
+                self.state.v_temp = min(
+                    150,
+                    self.state.v_temp + 5,
+                )
+
+            log.info(
+                "Engine Temp: %.1f C",
+                self.state.v_temp,
+            )
+
+        elif key == "w":
+
+            with self.state.lock:
+                self.state.v_amb_temp = min(
+                    80,
+                    self.state.v_amb_temp + 2,
+                )
+
+            log.info(
+                "Ambient Temp: %.1f C",
+                self.state.v_amb_temp,
+            )
+
+        elif key == "z":
+
+            with self.state.lock:
+                self.state.v_sas_angle += 10
+
+            log.info(
+                "SAS Angle: %d",
+                self.state.v_sas_angle,
+            )
+
+        elif key == "p":
+
+            with self.state.lock:
+                self.state.v_rpas_dist = max(
+                    0,
+                    self.state.v_rpas_dist - 10,
+                )
+
+            log.info(
+                "RPAS Distance: %d",
+                self.state.v_rpas_dist,
+            )
+
+        elif key == "k":
+
+            with self.state.lock:
+                self.state.v_drive_mode += 1
+
+                if self.state.v_drive_mode > 3:
+                    self.state.v_drive_mode = 0
+
+            log.info(
+                "Drive Mode: %d",
+                self.state.v_drive_mode,
+            )
+
+        elif key == "V":
+
+            with self.state.lock:
+                self.state.curr_speed_kmh = max(
+                    0,
+                    self.state.curr_speed_kmh - 5,
+                )
+
+            log.info(
+                "Speed: %.1f km/h",
+                self.state.curr_speed_kmh,
+            )
+
+        elif key == "R":
+
+            with self.state.lock:
+                self.state.curr_rpm = max(
+                    0,
+                    self.state.curr_rpm - 500,
+                )
+
+            log.info(
+                "RPM: %d",
+                self.state.curr_rpm,
+            )
+
+
+# ============================================================
+# REPORT
+# ============================================================
+
+
+def write_validation_report(
+    validator: ResponseValidator,
+):
+
+    if not validator.results:
+        log.info(
+            "No response validation results were generated."
+        )
+        return
+
+    timestamp = datetime.now().strftime(
+        "%Y%m%d_%H%M%S"
+    )
+
+    path = Path(
+        f"W501_response_validation_{timestamp}.csv"
+    )
+
+    with path.open(
+        "w",
+        newline="",
+        encoding="utf-8",
+    ) as file:
+
+        writer = csv.DictWriter(
+            file,
+            fieldnames=[
+                "timestamp",
+                "tx_id",
+                "rx_id",
+                "rx_data",
+                "result",
+                "reason",
+            ],
+        )
+
+        writer.writeheader()
+
+        writer.writerows(
+            validator.results
+        )
+
+    log.info(
+        "Response validation report: %s",
+        path.resolve(),
+    )
 
 
 # ============================================================
 # MAIN
 # ============================================================
 
+
 def main():
 
-    log.info("")
-    log.info("=" * 70)
-    log.info(" ECU CAN REQUEST / RESPONSE VALIDATOR")
-    log.info("=" * 70)
-    log.info("")
-    log.info("Interface : %s", CAN_INTERFACE)
+    print()
+    print("=" * 70)
+    print(" W501 CAPL -> PYTHON-CAN ECU VALIDATION")
+    print("=" * 70)
+    print()
+    print("CANoe is NOT required.")
+    print("Vector VN5610A is used through python-can.")
+    print()
 
-    can_interface = CANInterface()
+    bus = CANInterface()
+    state = ClusterState()
+    validator = ResponseValidator()
+
+    stop_event = threading.Event()
 
     try:
 
-        can_interface.connect()
+        bus.connect()
 
-        tests = create_test_cases()
-
-        validator = ECUValidator(
-            can_interface
+        # RX worker must start BEFORE TX.
+        rx_worker = RXWorker(
+            bus,
+            validator,
+            stop_event,
         )
 
-        suite = ECUTestSuite(
-            validator
+        rx_thread = threading.Thread(
+            target=rx_worker.run,
+            daemon=True,
+            name="W501-RX",
         )
 
-        suite.run(tests)
+        rx_thread.start()
+
+        transmitter = W501Transmitter(
+            bus,
+            state,
+            validator,
+        )
+
+        transmitter.start()
+
+        keyboard_controller = KeyboardController(
+            state,
+            transmitter,
+        )
+
+        keyboard_controller.run()
 
     except KeyboardInterrupt:
 
-        log.info("Interrupted by user.")
+        log.info("Interrupted.")
 
     except Exception:
 
-        log.exception("Application error.")
+        log.exception(
+            "W501 application error."
+        )
 
     finally:
 
-        can_interface.shutdown()
+        stop_event.set()
+
+        try:
+            transmitter.stop()
+        except Exception:
+            pass
+
+        try:
+            write_validation_report(
+                validator
+            )
+        except Exception:
+            log.exception(
+                "Could not write report."
+            )
+
+        bus.shutdown()
+
+        log.info("W501 automation stopped.")
 
 
 if __name__ == "__main__":
