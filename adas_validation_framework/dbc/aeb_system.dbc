@@ -1,0 +1,62 @@
+VERSION ""
+
+NS_ :
+    NS_DESC_
+    CM_
+    BA_DEF_
+    BA_
+    VAL_
+    CAT_DEF_
+    CAT_
+    FILTER
+    BA_DEF_DEF_
+    EV_DATA_
+    ENVVAR_DATA_
+    SGTYPE_
+    SGTYPE_VAL_
+    BA_DEF_SGTYPE_
+    BA_SGTYPE_
+    SIG_TYPE_REF_
+    VAL_TABLE_
+    SIG_GROUP_
+    SIG_VALTYPE_
+    SIGTYPE_VALTYPE_
+    BO_TX_BU_
+    BA_DEF_REL_
+    BA_REL_
+    BA_DEF_DEF_REL_
+    BU_SG_REL_
+    BU_EV_REL_
+    BU_BO_REL_
+    SG_MUL_VAL_
+
+BS_:
+
+BU_: ECU TESTER
+
+BO_ 256 AEB_SensorInput: 8 TESTER
+ SG_ TTC_ms : 0|16@1+ (1,0) [0|65535] "ms" ECU
+ SG_ ObjectDistance_cm : 16|16@1+ (1,0) [0|65535] "cm" ECU
+ SG_ ObjectRelSpeed_kph : 32|16@1- (0.1,0) [-3276.8|3276.7] "kph" ECU
+ SG_ ObjectValid : 48|1@1+ (1,0) [0|1] "" ECU
+ SG_ SensorFaultInject : 49|1@1+ (1,0) [0|1] "" ECU
+ SG_ FrameCounter : 56|8@1+ (1,0) [0|255] "" ECU
+
+BO_ 512 AEB_Status: 8 ECU
+ SG_ AEB_State : 0|4@1+ (1,0) [0|15] "" TESTER
+ SG_ BrakePressure_bar : 4|12@1+ (0.1,0) [0|100] "bar" TESTER
+ SG_ AEB_ActiveFlag : 16|1@1+ (1,0) [0|1] "" TESTER
+ SG_ FaultCode : 17|8@1+ (1,0) [0|255] "" TESTER
+ SG_ ResponseCounter : 25|8@1+ (1,0) [0|255] "" TESTER
+
+BO_ 768 VehicleDynamics: 8 TESTER
+ SG_ VehicleSpeed_kph : 0|16@1+ (0.1,0) [0|655.35] "kph" ECU
+ SG_ YawRate_degps : 16|16@1- (0.01,0) [-327.68|327.67] "degps" ECU
+
+CM_ BO_ 256 "Simulated radar/camera fusion sensor stimulus injected by the test framework.";
+CM_ BO_ 512 "AEB decision status transmitted back by the (simulated) ECU under test.";
+CM_ BO_ 768 "Host vehicle dynamics context frame.";
+CM_ SG_ 512 AEB_State "0=IDLE 1=WARNING 2=PARTIAL_BRAKE 3=FULL_BRAKE 4=FAULT";
+
+VAL_ 512 AEB_State 0 "IDLE" 1 "WARNING" 2 "PARTIAL_BRAKE" 3 "FULL_BRAKE" 4 "FAULT" ;
+VAL_ 512 FaultCode 0 "NO_FAULT" 1 "SENSOR_INVALID" 2 "SENSOR_TIMEOUT" 3 "PLAUSIBILITY_FAULT" ;
